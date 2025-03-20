@@ -1,4 +1,3 @@
-import v8flags from 'v8flags';
 import minimist from 'minimist';
 import input from "@inquirer/input";
 import ora, { type Ora } from 'ora';
