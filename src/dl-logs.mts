@@ -9,6 +9,10 @@ import type { PagedList } from 'azure-devops-node-api/interfaces/common/VSSInter
 import type { IBuildApi } from 'azure-devops-node-api/BuildApi.js';
 import type { IRequestOptions, IRestResponse } from 'typed-rest-client';
 import type { GitRepository } from 'azure-devops-node-api/interfaces/GitInterfaces.js';
+import { LogDir } from './LogDir.mjs';
+import { getLeafFailedLogIds } from './timeline-helpers.mjs';
+import { mkdirp } from './fs-helpers.mjs';
+import type { Timeline } from 'azure-devops-node-api/interfaces/TestInterfaces.js';
 
 
 type Args = {
@@ -71,52 +75,29 @@ function fileExists(filePath: string): Promise<boolean> {
     return fs.promises.stat(filePath).then(x => x.isFile()).catch(() => false)
 }
 
-async function downloadLogContent(args: Args, buildAPI: IBuildApi, buildId: number, logId: number): Promise<boolean> {
-    let pathBase = path.join(args.out, buildId.toString(), logId.toString());
+function getBuildDir(args: Args, buildId: number): string {
+    return path.join(args.out, "logs", buildId.toString());
+}
 
-    // check if the log file already exists, if so, skip it
-    if (await fileExists(pathBase + ".log")) {
+async function downloadLogContent(args: Args, buildAPI: IBuildApi, logDir:LogDir, buildId: number, logId: number): Promise<boolean> {
+    // check if the log file already exists
+    if (await logDir.hasLog(buildId, logId)) {
         return false;
     }
-
     let logContentStream = await buildAPI.getBuildLog(args.projectName, buildId, logId);
-    // streaming write the log content stream to a file
-    let logFile = fs.createWriteStream(pathBase + ".log.part");
-    logContentStream.on("data", (chunk) => {
-        logFile.write(chunk);
-    });
-    // wait for the log content stream to close the file and reject/resolve this promise
-    await new Promise((resolve, reject) => {
-        logContentStream.on("end", () => {
-            logFile.close(() => {
-                resolve(undefined);
-            });
-        });
-        logContentStream.on("error", (err) => {
-            logFile.close(() => {
-                reject(err);
-            });
-        });
-    });
-    // rename the file to remove the .part extension
-    await fs.promises.rename(pathBase + ".log.part", pathBase + ".log");
+    await logDir.saveLog(buildId, logId, logContentStream);
     return true
 }
 
-async function getBuildTimeline(args: Args, buildAPI: IBuildApi, buildId: number) {
-    const timelinePath = path.join(args.out, buildId.toString(), "timeline.json");
-    // check if the timeline file already exists, if so, read and return it
-    if (await fileExists(timelinePath)) {
-        let timeline = await fs.promises.readFile(timelinePath, "utf-8");
-        return JSON.parse(timeline) as bi.Timeline;
+async function getTimeline(args: Args, logDir: LogDir, buildAPI: IBuildApi, buildId: number): Promise<[bi.Timeline, boolean]> {
+    let timeline = await logDir.loadTimeline(buildId);
+    if (timeline) {
+        return [timeline, false];
     }
-
     // instead, download the timeline and save it to a file
-    let timeline = await buildAPI.getBuildTimeline(args.projectName, buildId);
-    // save the timeline to a file
-    await fs.promises.mkdir(path.join(args.out, buildId.toString()), { recursive: true });
-    await fs.promises.writeFile(timelinePath, JSON.stringify(timeline, null, 2));
-    return timeline;
+    timeline = await buildAPI.getBuildTimeline(args.projectName, buildId);
+    await logDir.saveTimeline(buildId, timeline);
+    return [timeline, true];
 }
 
 async function getArgs(): Promise<Args | null> {
@@ -143,11 +124,11 @@ async function getArgs(): Promise<Args | null> {
     }
 
     // check if the out directory exists, if not create it
-    await fs.promises.mkdir(pArgs.out, { recursive: true });
+    await mkdirp(pArgs.out);
     // check if the args.json file exists, if so, read it and parse it
-    let argsFile = path.join(pArgs.out, "args.json");
-    if (await fileExists(argsFile)) {
-        let args = await fs.promises.readFile(argsFile, "utf-8");
+    const argsFilePath = path.join(pArgs.out, "dl-logs-args.json");
+    if (await fileExists(argsFilePath)) {
+        let args = await fs.promises.readFile(argsFilePath, "utf-8");
         let argsObj = JSON.parse(args);
         for (let key in argsObj) {
             if (!Object.hasOwnProperty.call(pArgs, key)) {
@@ -201,7 +182,7 @@ async function getArgs(): Promise<Args | null> {
     console.log("saving arguments for future runs...")
     // save the arguments to a json file in the out directory
     await fs.promises.mkdir(args.out, { recursive: true });
-    await fs.promises.writeFile(path.join(args.out, "args.json"), JSON.stringify(args, null, 2));
+    await fs.promises.writeFile(argsFilePath, JSON.stringify(args, null, 2));
 
     return args
 }
@@ -254,20 +235,22 @@ async function main() {
     // start bulk downloading the logs
     console.log("Starting bulk download of logs...");
 
+    let logDir = new LogDir(args.out);
+
     let continuationToken: string | undefined = args.continuationToken;
     let page = 0;
     let buildCt = 0;
+    let logCt = 0;
     do {
         page++;
 
         // get the logs page and save its continuation token for the next loop
-        let pageSpinner = ora(`pg:${page} fetching page of builds`).start();
+        let pageSpinner = ora(`pg:${page} fetching page with continuationToken=${continuationToken}`).start();
         let builds: PagedList<bi.Build> = await getBuildsPage(args, buildAPI, targetRepo, continuationToken).catch(spinErr(pageSpinner));
         pageSpinner.succeed(
             `pg:${page} fetched ${builds.length} builds`,
         );
         continuationToken = lastContinuationToken;
-        console.log(`  pg:${page} continuationToken: ${continuationToken}`);
 
         // download the logs for this page
         for (let build of builds) {
@@ -280,8 +263,7 @@ async function main() {
             }
 
             // save the build json to a file
-            await fs.promises.mkdir(path.join(args.out, buildId.toString()), { recursive: true });
-            await fs.promises.writeFile(path.join(args.out, buildId.toString(), "build.json"), JSON.stringify(build, null, 2));
+            await logDir.saveBuild(buildId, build);
 
             // if the build is a success, don't download the build logs
             if (build.result === bi.BuildResult.Succeeded) {
@@ -297,35 +279,32 @@ async function main() {
                 text: `build:${buildCt} (id:${build.id}) fetching timeline`,
                 indent: 2
             }).start();
-            let timeline = await getBuildTimeline(args, buildAPI, buildId).catch(spinErr(buildSpinner));
-            let records = timeline.records ?? [];
-            let allParentTimelineEntryRecords = new Set();
-            for (let record of records) {
-                if (record.parentId != null) {
-                    allParentTimelineEntryRecords.add(record.parentId);
-                }
-            }
-            let leafFailedLogIds = (timeline.records ?? [])
-                .filter((record) => record.result == bi.TaskResult.Failed && !allParentTimelineEntryRecords.has(record.id))
-                .map((record) => record.log?.id)
-                .filter((logId) => logId != null);
+            let [timeline, timelineWasDownloaded] = await getTimeline(args, logDir, buildAPI, buildId).catch(spinErr(buildSpinner));
+            let leafFailedLogIds = await getLeafFailedLogIds(timeline);
 
             if (leafFailedLogIds.length == 0) {
                 buildSpinner.succeed(`build:${buildCt} (id:${build.id}) no failed logs`);
             } else {
                 // download the logs for this build
                 let skipCount = 0
-                for (let i = 0; i < leafFailedLogIds.length; i++) {
+                for (let [i,id] of leafFailedLogIds.entries()) {
                     let failedLogID = leafFailedLogIds[i];
                     buildSpinner.text = `build:${buildCt} (id:${build.id}) log:${i + 1}/${leafFailedLogIds.length} (id:${failedLogID})`;
-                    let wasDownloaded = await downloadLogContent(args, buildAPI, buildId, failedLogID).catch(spinErr(buildSpinner));
-                    if (!wasDownloaded) {
+                    let wasDownloaded = await downloadLogContent(args, buildAPI, logDir, buildId, failedLogID).catch(spinErr(buildSpinner));
+                    if (wasDownloaded) {
+                        logCt++;
+                    } else {
                         skipCount++;
                     }
                 }
-                buildSpinner.succeed(`build:${buildCt} (id:${build.id}) downloaded ${leafFailedLogIds.length} logs (${skipCount} skipped)`);
+                buildSpinner.succeed(`build:${buildCt} (id:${build.id}) downloaded ${leafFailedLogIds.length} logs (${skipCount} skipped).${
+                    !timelineWasDownloaded ? " (timeline skipped)" : ""
+                }`);
             }
         }
+
+        console.log(`total_builds:${buildCt} total_logs:${logCt}`);
+
     } while (continuationToken != null);
     console.log("\r\nFinished downloading logs");
 }
@@ -335,5 +314,6 @@ main().then(() => {
     console.log("done");
 }, (err) => {
     console.error(err);
+    console.error(err.stack);
     process.exit(1);
 });
