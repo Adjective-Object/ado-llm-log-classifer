@@ -137,8 +137,8 @@ async function downloadModels(
     let { repoName: summaryRepo, pathInRepo: summaryPath } = parseModelReference(hfSummaryModel);
     let { repoName: embeddingRepo, pathInRepo: embeddingPath } = parseModelReference(hfEmbeddingModel);
 
-    let summarizeModel = await downloadModel(summaryRepo, summaryPath, outDir, hfToken);
     let embeddingModel = await downloadModel(embeddingRepo, embeddingPath, outDir, hfToken);
+    let summarizeModel = await downloadModel(summaryRepo, summaryPath, outDir, hfToken);
 
     return { embeddingModel, summarizeModel };
 }
@@ -148,7 +148,12 @@ async function main() {
         "classify-logs",
         argDescriptors,
         (args: Partial<Args>) => path.join(args.outBaseDir ?? "out", "classify-logs-args.json"),
-    ) as Args;
+    );
+    if (args == null) {
+        return;
+    }
+
+    console.log("Arguments:\n" + Object.entries(args).map(([k, v]) => `  ${k}: ${v}`).join("\n"));
 
     // download the models
     let { embeddingModel, summarizeModel } = await downloadModels(args.outBaseDir, args.hfToken, args.hfSummaryModel, args.hfEmbeddingModel);

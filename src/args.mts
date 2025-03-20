@@ -55,16 +55,14 @@ export async function parseArgs<TArgs extends {[key: string]: string}>(
         console.log(`Found old args at ${argsSavePath}, using them as defaults`);
         for (let [argName, argValue] of Object.entries(oldArgs)) {
             if (!rawArgs[argName]) {
-                rawArgs[argName] = argValue;
+                (parsedArgs as any)[argName] = argValue;
             }
         }
     }
 
-    let entries: Partial<TArgs> = {}
     for (let [argName, argDescriptor] of Object.entries(argDescriptors)) {
         let descriptor = argDescriptor as RequiredArgDescriptor | ArgDescriptor;
-        if (rawArgs[argName]) {
-            entries[argName as keyof TArgs] = rawArgs[argName]
+        if (argName in parsedArgs) {
             continue;
         }
 
@@ -73,7 +71,7 @@ export async function parseArgs<TArgs extends {[key: string]: string}>(
                 message: descriptor.missingPrompt,
                 required: true,
             })
-            entries[argName as keyof TArgs] = value as any
+            parsedArgs[argName as keyof TArgs] = value as any
         }
     }
 
@@ -81,7 +79,7 @@ export async function parseArgs<TArgs extends {[key: string]: string}>(
     await mkdirp(path.dirname(argsSavePath));
     await fs.promises.writeFile(
         argsSavePath,
-        JSON.stringify(entries, null, 2),
+        JSON.stringify(parsedArgs, null, 2),
         { encoding: 'utf-8' },
     );
     return parsedArgs as TArgs;
