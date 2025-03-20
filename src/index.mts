@@ -9,21 +9,8 @@ import * as bi from 'azure-devops-node-api/interfaces/BuildInterfaces.js';
 import type { PagedList } from 'azure-devops-node-api/interfaces/common/VSSInterfaces.js';
 import type { IBuildApi } from 'azure-devops-node-api/BuildApi.js';
 import type { IRequestOptions, IRestResponse } from 'typed-rest-client';
-import * as rm from 'typed-rest-client/RestClient.js';
 import type { GitRepository } from 'azure-devops-node-api/interfaces/GitInterfaces.js';
 
-function _ora(msg: string): Ora {
-    if (process.stdout.isTTY || process.stdin.isTTY) {
-        return ora(msg);
-    } else {
-        return {
-            start: console.log,
-            succeed: console.log,
-            fail: console.log,
-            text: msg,
-        } as unknown as Ora;
-    }
-}
 
 type Args = {
     help: boolean;
@@ -33,6 +20,7 @@ type Args = {
     repo: string;
     branch: string;
     out: string;
+    continuationToken?: string;
 };
 
 function printHelp() {
@@ -84,12 +72,12 @@ function fileExists(filePath: string): Promise<boolean> {
     return fs.promises.stat(filePath).then(x => x.isFile()).catch(() => false)
 }
 
-async function downloadLogContent(args: Args, buildAPI: IBuildApi, buildId: number, logId: number) {
+async function downloadLogContent(args: Args, buildAPI: IBuildApi, buildId: number, logId: number): Promise<boolean> {
     let pathBase = path.join(args.out, buildId.toString(), logId.toString());
 
     // check if the log file already exists, if so, skip it
     if (await fileExists(pathBase + ".log")) {
-        return;
+        return false;
     }
 
     let logContentStream = await buildAPI.getBuildLog(args.projectName, buildId, logId);
@@ -101,16 +89,19 @@ async function downloadLogContent(args: Args, buildAPI: IBuildApi, buildId: numb
     // wait for the log content stream to close the file and reject/resolve this promise
     await new Promise((resolve, reject) => {
         logContentStream.on("end", () => {
-            logFile.close();
-            resolve(undefined);
+            logFile.close(() => {
+                resolve(undefined);
+            });
         });
         logContentStream.on("error", (err) => {
-            logFile.close();
-            reject(err);
+            logFile.close(() => {
+                reject(err);
+            });
         });
     });
     // rename the file to remove the .part extension
     await fs.promises.rename(pathBase + ".log.part", pathBase + ".log");
+    return true
 }
 
 async function getBuildTimeline(args: Args, buildAPI: IBuildApi, buildId: number) {
@@ -139,6 +130,7 @@ async function getArgs(): Promise<Args | null> {
             j: "projectName",
             r: "repo",
             o: "out",
+            c: "continuationToken",
         },
     });
 
@@ -167,39 +159,33 @@ async function getArgs(): Promise<Args | null> {
         }
     }
 
-    let argsDirty = false
 
     // prompt the user for missing fields
     if (!pArgs.patToken) {
-        argsDirty = true;
         pArgs.patToken = await input({
             message: "ADO PAT token (with build:read and code:read access):",
             required: true,
         });
     }
     if (!pArgs.orgName) {
-        argsDirty = true;
         pArgs.orgName = await input({
             message: "ADO organization",
             required: true,
         });
     }
     if (!pArgs.projectName) {
-        argsDirty = true;
         pArgs.projectName = await input({
             message: "ADO project name",
             required: true,
         });
     }
     if (!pArgs.repo) {
-        argsDirty = true;
         pArgs.repo = await input({
             message: `Repository from ${pArgs.orgName}`,
             required: true,
         });
     }
     if (!pArgs.branch) {
-        argsDirty = true;
         pArgs.branch = await input({
             message: `Branch of ${pArgs.orgName}:${pArgs.projectName}/${pArgs.repo}`,
             required: true,
@@ -213,12 +199,10 @@ async function getArgs(): Promise<Args | null> {
 
     console.log("Arguments:\n" + Object.entries(args).map(([k, v]) => `  ${k}: ${v}`).join("\n"));
 
-    if (argsDirty) {
-        console.log("saving arguments for future runs...")
-        // save the arguments to a json file in the out directory
-        await fs.promises.mkdir(args.out, { recursive: true });
-        await fs.promises.writeFile(path.join(args.out, "args.json"), JSON.stringify(args, null, 2));
-    }
+    console.log("saving arguments for future runs...")
+    // save the arguments to a json file in the out directory
+    await fs.promises.mkdir(args.out, { recursive: true });
+    await fs.promises.writeFile(path.join(args.out, "args.json"), JSON.stringify(args, null, 2));
 
     return args
 }
@@ -271,14 +255,14 @@ async function main() {
     // start bulk downloading the logs
     console.log("Starting bulk download of logs...");
 
-    let continuationToken: string | undefined = undefined;
+    let continuationToken: string | undefined = args.continuationToken;
     let page = 0;
     let buildCt = 0;
     do {
         page++;
 
         // get the logs page and save its continuation token for the next loop
-        let pageSpinner = _ora(`pg:${page} fetching page of builds`).start();
+        let pageSpinner = ora(`pg:${page} fetching page of builds`).start();
         let builds: PagedList<bi.Build> = await getBuildsPage(args, buildAPI, targetRepo, continuationToken).catch(spinErr(pageSpinner));
         pageSpinner.succeed(
             `pg:${page} fetched ${builds.length} builds`,
@@ -310,7 +294,10 @@ async function main() {
             }
 
             // download the build timeline
-            let buildSpinner = _ora(`  build:${buildCt} (id:${build.id}) fetching timeline`).start();
+            let buildSpinner = ora({
+                text: `build:${buildCt} (id:${build.id}) fetching timeline`,
+                indent: 2
+            }).start();
             let timeline = await getBuildTimeline(args, buildAPI, buildId).catch(spinErr(buildSpinner));
             let records = timeline.records ?? [];
             let allParentTimelineEntryRecords = new Set();
@@ -325,15 +312,19 @@ async function main() {
                 .filter((logId) => logId != null);
 
             if (leafFailedLogIds.length == 0) {
-                buildSpinner.succeed(`  build:${buildCt} (id:${build.id}) no failed logs`);
+                buildSpinner.succeed(`build:${buildCt} (id:${build.id}) no failed logs`);
             } else {
                 // download the logs for this build
+                let skipCount = 0
                 for (let i = 0; i < leafFailedLogIds.length; i++) {
                     let failedLogID = leafFailedLogIds[i];
-                    buildSpinner.text = `  build:${buildCt} (id:${build.id}) failed log:${i + 1}/${leafFailedLogIds.length} (${failedLogID})`;
-                    await downloadLogContent(args, buildAPI, buildId, failedLogID).catch(spinErr(buildSpinner));
+                    buildSpinner.text = `build:${buildCt} (id:${build.id}) log:${i + 1}/${leafFailedLogIds.length} (id:${failedLogID})`;
+                    let wasDownloaded = await downloadLogContent(args, buildAPI, buildId, failedLogID).catch(spinErr(buildSpinner));
+                    if (!wasDownloaded) {
+                        skipCount++;
+                    }
                 }
-                buildSpinner.succeed(`  build:${buildCt} (id:${build.id}) downloaded ${leafFailedLogIds.length} failed logs`);
+                buildSpinner.succeed(`build:${buildCt} (id:${build.id}) downloaded ${leafFailedLogIds.length} logs (${skipCount} skipped)`);
             }
         }
     } while (continuationToken != null);
