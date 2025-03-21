@@ -14,5 +14,49 @@ describe("getLeafFailureRecords", () => {
         let result = getLeafFailureRecords(timeline);
         expect(result.sort()).toEqual([1, 2]);
     });
-}
-);
+
+    it("works on an example test case", () => {
+        const exampleTimeline: Timeline = {
+            records: [
+                {
+                    "id": "id-0",
+                    "parentId": "id-1",
+                    "type": "Task",
+                    "name": "build task",
+                    "state": 2,
+                    "result": 3,
+                },
+                {
+                    "id": "id-1",
+                    "parentId": "id-3",
+                    "type": "Job",
+                    "name": "Build",
+                    "state": 2,
+                    "result": 3,
+                },
+                {
+                    "id": "id-3",
+                    "parentId": "id-4",
+                    "type": "Phase",
+                    "name": "Build",
+                    "state": 2,
+                    "result": 2,
+                },
+                {
+                    "previousAttempts": [],
+                    "id": "id-4",
+                    "parentId": null,
+                    "type": "Stage",
+                    "name": "Main",
+                    "state": 2,
+                    "result": 2,
+                },
+            ]
+        }
+
+        const result = getLeafFailureRecords(exampleTimeline as Timeline);
+        expect(result).toEqual([
+            0,
+        ]);
+    });
+});

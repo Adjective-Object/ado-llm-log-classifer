@@ -16,6 +16,20 @@ export function getLeafFailureRecords(
         }
     }
     type RecordTuple = [TimelineRecord, number];
+
+    function traverseParentRecordHasCancellationFailure(id: string) {
+        let head: string | null | undefined = id;
+        while (head) {
+            if (allTimelineEntryResults.get(head) == TaskResult.Failed) {
+                return true;
+            } else if (allTimelineEntryResults.get(head) == TaskResult.Canceled) {
+                head = records.find((record) => record.id == head)?.parentId;
+            } else {
+                return false
+            }
+        }
+    }
+
     let leafFailedRecordIdxes = (timeline.records ?? [])
         .map((record, i) => [record, i] as RecordTuple)
         .filter(([record,]) =>
@@ -27,9 +41,7 @@ export function getLeafFailureRecords(
                 record.result == TaskResult.Failed ||
                 // or, the task was canceled and the parent either failed or was itself cancelled:
                 // this timed out and we should consider it a "leaf" failure
-                record.result == TaskResult.Canceled &&
-                record.parentId &&
-                allTimelineEntryResults.get(record.parentId) == TaskResult.Failed
+                record.result == TaskResult.Canceled && traverseParentRecordHasCancellationFailure(record.id!)
             ))
         .map(([, idx]) => idx)
     return leafFailedRecordIdxes
