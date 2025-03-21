@@ -2,19 +2,28 @@ import * as fs from 'node:fs';
 import * as stream from "node:stream"
 import * as path from 'node:path';
 import * as hub from "@huggingface/hub";
-import { parseArgs } from './args.mjs';
+import { BuildResult } from 'azure-devops-node-api/interfaces/BuildInterfaces.js';
+import { parseArgs, type ArgDescriptors } from './args.mjs';
 import ora from 'ora';
-import { mkdirp } from './fs-helpers.mjs';
-import { error } from 'node:console';
+import { fileExists, mkdirp } from './fs-helpers.mjs';
+import { getLlama } from "node-llama-cpp";
+import { EmbedDir, LogDir } from './LogDir.mjs';
+import { getLeafFailedJobs } from './timeline-helpers.mjs';
+import { catchOra, withOra } from './ora-helpers.mjs';
+import {
+    embedChunkedTokens,
+    MemoizedEmbedder,
+    tokenizeAndChunkText,
+    type EmbeddedJobFailure
+} from './embedding.mjs';
 
 type Args = {
     help?: string;
     hfToken: string;
-    hfSummaryModel: string;
     hfEmbeddingModel: string;
     outBaseDir: string;
 };
-const argDescriptors = {
+const argDescriptors: ArgDescriptors<Args> = {
     help: {
         shortName: 'h',
         helpDescription: 'Print this help message',
@@ -24,11 +33,11 @@ const argDescriptors = {
         helpDescription: 'The hugging face PAT token',
         missingPrompt: 'HuggingFace PAT Token',
     },
-    hfSummaryModel: {
-        shortName: 'S',
-        helpDescription: 'The model to use for summarization, formatted as "repoName:pathInRepo"',
-        missingPrompt: 'HuggingFace Summary Model (repo:pathInRepo)',
-    },
+    // hfSummaryModel: {
+    //     shortName: 'S',
+    //     helpDescription: 'The model to use for summarization, formatted as "repoName:pathInRepo"',
+    //     missingPrompt: 'HuggingFace Summary Model (repo:pathInRepo)',
+    // },
     hfEmbeddingModel: {
         shortName: 'E',
         helpDescription: 'The model to use for embedding, formatted as "repoName:pathInRepo"',
@@ -41,16 +50,13 @@ const argDescriptors = {
     },
 };
 
+
 function sanitizeFileName(name: string): string {
     return name.replace(/[^a-zA-Z0-9\.]/g, '-');
 }
 
-function fileExists(filePath: string): Promise<boolean> {
-    return fs.promises.stat(filePath).then(x => x.isFile()).catch(() => false)
-}
-
 async function runDownload(
-    download: Response| null,
+    download: Response | null,
     targetPath: string,
 ): Promise<void> {
     if (!download) {
@@ -108,7 +114,7 @@ async function downloadModel(
     });
     const spinner = ora(`downloading ${repoName}:${pathInRepo}`).start();
     await runDownload(download, modelDlPath).then(
-        () =>         spinner.succeed(`downloaded ${repoName}:${pathInRepo}`),
+        () => spinner.succeed(`downloaded ${repoName}:${pathInRepo}`),
         (err) => {
             spinner.fail(`failed to download ${repoName}:${pathInRepo}`)
             throw err;
@@ -128,21 +134,6 @@ function parseModelReference(reference: string): { repoName: string, pathInRepo:
     };
 }
 
-async function downloadModels(
-    outDir: string,
-    hfToken: string,
-    hfSummaryModel: string,
-    hfEmbeddingModel: string
-): Promise<{ embeddingModel: String, summarizeModel: String }> {
-    let { repoName: summaryRepo, pathInRepo: summaryPath } = parseModelReference(hfSummaryModel);
-    let { repoName: embeddingRepo, pathInRepo: embeddingPath } = parseModelReference(hfEmbeddingModel);
-
-    let embeddingModel = await downloadModel(embeddingRepo, embeddingPath, outDir, hfToken);
-    let summarizeModel = await downloadModel(summaryRepo, summaryPath, outDir, hfToken);
-
-    return { embeddingModel, summarizeModel };
-}
-
 async function main() {
     const args = await parseArgs(
         "classify-logs",
@@ -155,10 +146,116 @@ async function main() {
 
     console.log("Arguments:\n" + Object.entries(args).map(([k, v]) => `  ${k}: ${v}`).join("\n"));
 
-    // download the models
-    let { embeddingModel, summarizeModel } = await downloadModels(args.outBaseDir, args.hfToken, args.hfSummaryModel, args.hfEmbeddingModel);
-    console.log(`Downloaded models to ${embeddingModel} and ${summarizeModel}`);
+    // download the embedding model
+    let { repoName: embeddingRepo, pathInRepo: embeddingPath } = parseModelReference(args.hfEmbeddingModel);
+    let embeddingModelPath = await downloadModel(embeddingRepo, embeddingPath, args.outBaseDir, args.hfToken);
+    console.log(`Downloaded embedding model to ${embeddingModelPath}`);
 
+    // Load the embedding model in to llama-cpp
+    let llama = await withOra(getLlama(), 'loading llama-cpp');
+    let model = await withOra(llama.loadModel({
+        modelPath: embeddingModelPath,
+    }), 'loading embedding model');
+
+    // compute embeddings for each failed build
+    let spinner = ora('embedding builds');
+    let logDir = new LogDir(args.outBaseDir);
+    let buildIds = await logDir.listBuilds();
+    let embedDir = new EmbedDir(args.outBaseDir);
+
+    let skippedSuccessfulCt = 0;
+    let skippedPartialCt = 0;
+    let embeddedBuildCt = 0;
+    let skippedAlreadyBuildCt = 0;
+    let embeddedJobCt = 0;
+    let skippedAlreadyJobCt = 0;
+
+    const embeddingContext = await model.createEmbeddingContext();
+    // create a memoized embedder to avoid recomputing embeddings for the same text
+    //
+    // We do this because we expect issue messages to be repeated across builds, and we don't want to
+    // re-embed the same text multiple times if we can avoid it.
+    const issueEmbedder = new MemoizedEmbedder(embeddingContext);
+
+    for (let [i, buildId] of buildIds.entries()) {
+        let prefix = `(${i}/${buildIds.length}) [suc:${skippedSuccessfulCt} prt:${skippedPartialCt} skip:${skippedAlreadyBuildCt}b/${skippedAlreadyJobCt}j emb:${embeddedBuildCt}b/${embeddedJobCt}j]`
+        spinner.text = prefix;
+
+        let build = await logDir.loadBuild(buildId);
+        if (build == null) {
+            skippedPartialCt++;
+            continue;
+        }
+        if (build.result != BuildResult.Failed) {
+            // silently skip builds that haven't been downloaded or were succesful
+            skippedSuccessfulCt++;
+            continue
+        };
+        spinner.text = prefix + `: embedding build ${buildId}`;
+        let timeline = await logDir.loadTimeline(buildId);
+        if (timeline == null) {
+            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (timeline missing)`, symbol: '🟡' });
+            // replace the spinner
+            spinner = ora(spinner.text).start();
+            skippedPartialCt++;
+            continue;
+        }
+
+        let failedJobs = getLeafFailedJobs(timeline);
+        if (failedJobs.length == 0) {
+            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (no failed leaf jobs)`, symbol: '🟡' });
+            // replace the spinner
+            spinner = ora(spinner.text).start();
+            skippedSuccessfulCt++;
+            continue;
+        }
+
+        let anyEmbed = false
+        for (let job of failedJobs) {
+            // check if the job has already been embedded
+            if (await embedDir.hasBuildJobEmbeddings(buildId, job.id)) {
+                skippedAlreadyJobCt++;
+                continue;
+            }
+            anyEmbed = true;
+
+
+            spinner.text = prefix + `: build ${buildId} job ${job.id} - ${job.failingIssueMessages.length} issues`;
+            let issueEmbeddings = await Promise.all(
+                job.failingIssueMessages.map((msg) => issueEmbedder.embed(msg))
+            ).catch(catchOra(spinner));
+            let logEmbedding = await (job.logId ? logDir.loadLog(buildId, job.logId).then(
+                (log) => {
+                    if (!log) {
+                        return null;
+                    }
+                    let chunks = tokenizeAndChunkText(log, embeddingContext);
+                    spinner.text = prefix + `: embedding build ${buildId} job ${job.id} log (${chunks.length} chunks)`;
+                    return embedChunkedTokens(chunks, embeddingContext);
+                }
+            ) : null)?.catch(catchOra(spinner));
+
+            spinner.text = prefix + `: embedding build ${buildId} job ${job.id} -- saving`;
+
+            // save the embeddings
+            let toSave: EmbeddedJobFailure = {
+                jobId: job.id,
+                issues: issueEmbeddings,
+            };
+            if (logEmbedding) {
+                toSave.log = logEmbedding;
+            }
+            await embedDir.saveBuildJobEmbeddings(buildId, toSave).catch(catchOra(spinner));
+            embeddedJobCt++;
+        }
+        if (anyEmbed) {
+            embeddedBuildCt++;
+        } else {
+            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (all jobs already embedded)`, symbol: '🟡' });
+        }
+    }
+
+    spinner.succeed(`embedding complete (${embeddedBuildCt}/${buildIds.length} builds)`);
 }
 
 main().catch((err) => {

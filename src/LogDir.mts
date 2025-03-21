@@ -1,10 +1,34 @@
 import type { Build, Timeline } from "azure-devops-node-api/interfaces/BuildInterfaces.js";
+import type { EmbeddedJobFailure } from "./embedding.mjs";
 import path from "node:path";
 import * as fs from "node:fs";
-import { fileExists, mkdirp } from "./fs-helpers.mjs";
+import { fileExists, dirExists, mkdirp } from "./fs-helpers.mjs";
+import { LlamaEmbedding } from "node-llama-cpp";
+
+async function saveObject(
+    objPath: string,
+    obj: any,
+) {
+    await mkdirp(path.dirname(objPath));
+    await fs.promises.writeFile(
+        objPath,
+        JSON.stringify(obj, null, 2),
+        { encoding: 'utf-8' },
+    );
+}
+
+async function loadObject(
+    objPath: string,
+): Promise<any | undefined> {
+    if (await fileExists(objPath)) {
+        const obj = await fs.promises.readFile(objPath, { encoding: 'utf-8' });
+        return JSON.parse(obj);
+    }
+    return undefined;
+}
 
 export class LogDir {
-    constructor(private outDir: string) {}
+    constructor(private outDir: string) { }
 
     private getBase() {
         return path.join(this.outDir, 'logs');
@@ -13,39 +37,20 @@ export class LogDir {
     getLogDirForBuild(buildId: number) {
         return path.join(this.getBase(), buildId.toString());
     }
-
-    private async saveObject(
-        objPath: string,
-        obj: any,
-    ) {
-        await mkdirp(path.dirname(objPath));
-        await fs.promises.writeFile(
-            objPath,
-            JSON.stringify(obj, null, 2),
-            { encoding: 'utf-8' },
-        );
-    }
-
-    private async loadObject(
-        objPath: string,
-    ): Promise<any | undefined> {
-        if (await fileExists(objPath)) {
-            const obj = await fs.promises.readFile(objPath, { encoding: 'utf-8' });
-            return JSON.parse(obj);
-        }
-        return undefined;
+    getEmbedsDirForBuild(buildId: number) {
+        return path.join(this.getBase(), buildId.toString());
     }
 
     async saveBuild(buildId: number, build: Build) {
-        await this.saveObject(path.join(this.getLogDirForBuild(buildId), "build.json"), build)
+        await saveObject(path.join(this.getLogDirForBuild(buildId), "build.json"), build)
     }
     async loadBuild(buildId: number): Promise<Build | undefined> {
-        return await this.loadObject(path.join(this.getLogDirForBuild(buildId), "build.json"))
+        return await loadObject(path.join(this.getLogDirForBuild(buildId), "build.json"))
     }
     /// Returns a list of build IDs
     async listBuilds(): Promise<number[]> {
         const buildsDir = this.getBase();
-        if (!await fileExists(buildsDir)) {
+        if (!await dirExists(buildsDir)) {
             return [];
         }
         const buildDirs = await fs.promises.readdir(buildsDir);
@@ -61,10 +66,10 @@ export class LogDir {
 
     async saveTimeline(buildId: number, timeline: unknown) {
         const timelinePath = path.join(this.getLogDirForBuild(buildId), 'timeline.json');
-        await this.saveObject(timelinePath, timeline);
+        await saveObject(timelinePath, timeline);
     }
     async loadTimeline(buildId: number): Promise<Timeline | undefined> {
-        return await this.loadObject(path.join(this.getLogDirForBuild(buildId), 'timeline.json'));
+        return await loadObject(path.join(this.getLogDirForBuild(buildId), 'timeline.json'));
     }
 
     private logName(logId: number) {
@@ -114,5 +119,60 @@ export class LogDir {
     ): Promise<boolean> {
         const logPath = path.join(this.getLogDirForBuild(buildId), this.logName(logId));
         return await fileExists(logPath);
+    }
+}
+
+export class EmbedDir {
+    constructor(private outDir: string) { }
+
+    private getBase() {
+        return path.join(this.outDir, 'embed');
+    }
+
+    getEmbedDirForBuild(buildId: number) {
+        return path.join(this.getBase(), buildId.toString());
+    }
+    getEmbedFileForBuild(buildId: number, logId: number) {
+        return path.join(this.getEmbedDirForBuild(buildId), `embed-${logId}.json`);
+    }
+
+    async saveBuildJobEmbeddings(
+        buildId: number,
+        embed: EmbeddedJobFailure,
+    ) {
+        const toSimple = (embedding: LlamaEmbedding) => ({
+            vector: Array.from(embedding.vector),
+        });
+        await saveObject(this.getEmbedFileForBuild(buildId, embed.jobId), {
+            issues: embed.issues.map(toSimple),
+            log: embed.log ? toSimple(embed.log) : undefined,
+        });
+    }
+    async hasBuildJobEmbeddings(
+        buildId: number,
+        jobId: number,
+    ): Promise<boolean> {
+        return await fileExists(this.getEmbedFileForBuild(buildId, jobId));
+    }
+    async loadBuildJobEmbeddings(
+        buildId: number,
+        jobId: number,
+    ): Promise<EmbeddedJobFailure | undefined> {
+        let raw = await loadObject(this.getEmbedFileForBuild(buildId, jobId));
+        if (!raw) {
+            return undefined;
+        }
+
+        // convert the raw object to an EmbeddedJobFailure object
+        let issues = raw.issues.map((issue: any) => new LlamaEmbedding({
+            vector: issue.vector,
+        }))
+        return {
+            jobId,
+            issues,
+            log: raw.log ? new LlamaEmbedding({
+                vector: raw.log.vector,
+            }) : undefined,
+        };
     }
 }

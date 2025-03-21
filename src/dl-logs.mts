@@ -12,7 +12,7 @@ import type { GitRepository } from 'azure-devops-node-api/interfaces/GitInterfac
 import { LogDir } from './LogDir.mjs';
 import { getLeafFailedLogIds } from './timeline-helpers.mjs';
 import { mkdirp } from './fs-helpers.mjs';
-import type { Timeline } from 'azure-devops-node-api/interfaces/TestInterfaces.js';
+import { catchOra } from './ora-helpers.mjs';
 
 
 type Args = {
@@ -79,7 +79,7 @@ function getBuildDir(args: Args, buildId: number): string {
     return path.join(args.out, "logs", buildId.toString());
 }
 
-async function downloadLogContent(args: Args, buildAPI: IBuildApi, logDir:LogDir, buildId: number, logId: number): Promise<boolean> {
+async function downloadLogContent(args: Args, buildAPI: IBuildApi, logDir: LogDir, buildId: number, logId: number): Promise<boolean> {
     // check if the log file already exists
     if (await logDir.hasLog(buildId, logId)) {
         return false;
@@ -187,13 +187,6 @@ async function getArgs(): Promise<Args | null> {
     return args
 }
 
-function spinErr(spinner: Ora) {
-    return (err: Error) => {
-        spinner.fail();
-        throw err;
-    };
-}
-
 async function main() {
     let a = await getArgs();
     if (a == null) {
@@ -245,8 +238,9 @@ async function main() {
         page++;
 
         // get the logs page and save its continuation token for the next loop
-        let pageSpinner = ora(`pg:${page} fetching page with continuationToken=${continuationToken}`).start();
-        let builds: PagedList<bi.Build> = await getBuildsPage(args, buildAPI, targetRepo, continuationToken).catch(spinErr(pageSpinner));
+        console.log(`continuationToken=${continuationToken}`)
+        let pageSpinner = ora(`pg:${page} fetching page`).start();
+        let builds: PagedList<bi.Build> = await getBuildsPage(args, buildAPI, targetRepo, continuationToken).catch(catchOra(pageSpinner));
         pageSpinner.succeed(
             `pg:${page} fetched ${builds.length} builds`,
         );
@@ -266,8 +260,11 @@ async function main() {
             await logDir.saveBuild(buildId, build);
 
             // if the build is a success, don't download the build logs
-            if (build.result === bi.BuildResult.Succeeded) {
-                console.log(`    build:${buildCt} (id:${build.id}) succeeded, skipping`);
+            if (build.result === bi.BuildResult.Succeeded ||
+                build.result === bi.BuildResult.Canceled ||
+                build.result === bi.BuildResult.None
+            ) {
+                console.log(`    build:${buildCt} (id:${build.id}) ${bi.BuildResult[build.result].toLocaleLowerCase()}, skipping`);
                 continue;
             } else if (!build.result) {
                 console.log(`    build:${buildCt} (id:${build.id}) has no result, skipping`);
@@ -279,7 +276,7 @@ async function main() {
                 text: `build:${buildCt} (id:${build.id}) fetching timeline`,
                 indent: 2
             }).start();
-            let [timeline, timelineWasDownloaded] = await getTimeline(args, logDir, buildAPI, buildId).catch(spinErr(buildSpinner));
+            let [timeline, timelineWasDownloaded] = await getTimeline(args, logDir, buildAPI, buildId).catch(catchOra(buildSpinner));
             let leafFailedLogIds = await getLeafFailedLogIds(timeline);
 
             if (leafFailedLogIds.length == 0) {
@@ -287,19 +284,18 @@ async function main() {
             } else {
                 // download the logs for this build
                 let skipCount = 0
-                for (let [i,id] of leafFailedLogIds.entries()) {
+                for (let [i, id] of leafFailedLogIds.entries()) {
                     let failedLogID = leafFailedLogIds[i];
                     buildSpinner.text = `build:${buildCt} (id:${build.id}) log:${i + 1}/${leafFailedLogIds.length} (id:${failedLogID})`;
-                    let wasDownloaded = await downloadLogContent(args, buildAPI, logDir, buildId, failedLogID).catch(spinErr(buildSpinner));
+                    let wasDownloaded = await downloadLogContent(args, buildAPI, logDir, buildId, failedLogID).catch(catchOra(buildSpinner));
                     if (wasDownloaded) {
                         logCt++;
                     } else {
                         skipCount++;
                     }
                 }
-                buildSpinner.succeed(`build:${buildCt} (id:${build.id}) downloaded ${leafFailedLogIds.length} logs (${skipCount} skipped).${
-                    !timelineWasDownloaded ? " (timeline skipped)" : ""
-                }`);
+                buildSpinner.succeed(`build:${buildCt} (id:${build.id}) downloaded ${leafFailedLogIds.length} logs (${skipCount} skipped).${!timelineWasDownloaded ? " (timeline skipped)" : ""
+                    }`);
             }
         }
 
