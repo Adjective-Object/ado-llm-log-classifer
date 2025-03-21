@@ -4,6 +4,7 @@ import path from "node:path";
 import * as fs from "node:fs";
 import { fileExists, dirExists, mkdirp } from "./fs-helpers.mjs";
 import { LlamaEmbedding } from "node-llama-cpp";
+import { FailedJob } from "timeline-helpers.mjs";
 
 async function saveObject(
     objPath: string,
@@ -132,8 +133,11 @@ export class EmbedDir {
     getEmbedDirForBuild(buildId: number) {
         return path.join(this.getBase(), buildId.toString());
     }
-    getEmbedFileForBuild(buildId: number, logId: number) {
+    getEmbedFileForBuildJob(buildId: number, logId: number) {
         return path.join(this.getEmbedDirForBuild(buildId), `embed-${logId}.json`);
+    }
+    getRawFileForBuildJob(buildId: number, logId: number) {
+        return path.join(this.getEmbedDirForBuild(buildId), `job-${logId}.json`);
     }
 
     async saveBuildJobEmbeddings(
@@ -143,7 +147,7 @@ export class EmbedDir {
         const toSimple = (embedding: LlamaEmbedding) => ({
             vector: Array.from(embedding.vector),
         });
-        await saveObject(this.getEmbedFileForBuild(buildId, embed.jobId), {
+        await saveObject(this.getEmbedFileForBuildJob(buildId, embed.jobId), {
             issues: embed.issues.map(toSimple),
             log: embed.log ? toSimple(embed.log) : undefined,
         });
@@ -152,13 +156,13 @@ export class EmbedDir {
         buildId: number,
         jobId: number,
     ): Promise<boolean> {
-        return await fileExists(this.getEmbedFileForBuild(buildId, jobId));
+        return await fileExists(this.getEmbedFileForBuildJob(buildId, jobId));
     }
     async loadBuildJobEmbeddings(
         buildId: number,
         jobId: number,
     ): Promise<EmbeddedJobFailure | undefined> {
-        let raw = await loadObject(this.getEmbedFileForBuild(buildId, jobId));
+        let raw = await loadObject(this.getEmbedFileForBuildJob(buildId, jobId));
         if (!raw) {
             return undefined;
         }
@@ -174,5 +178,17 @@ export class EmbedDir {
                 vector: raw.log.vector,
             }) : undefined,
         };
+    }
+    async saveBuildJobRaw(
+        buildId: number,
+        raw: FailedJob,
+    ) {
+        await saveObject(this.getRawFileForBuildJob(buildId, raw.id), raw);
+    }
+    async loadBuildJobRaw(
+        buildId: number,
+        jobId: number,
+    ): Promise<FailedJob | undefined> {
+        return await loadObject(this.getRawFileForBuildJob(buildId, jobId));
     }
 }

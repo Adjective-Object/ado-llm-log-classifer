@@ -302,7 +302,7 @@ async function main() {
         console.log(`total_builds:${buildCt} total_logs:${logCt}`);
 
     } while (continuationToken != null);
-    console.log("\r\nFinished downloading logs");
+    console.log("\nFinished downloading logs");
 }
 
 // if __name__ == "__main__": for node

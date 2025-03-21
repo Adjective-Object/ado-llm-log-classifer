@@ -16,6 +16,7 @@ import {
     tokenizeAndChunkText,
     type EmbeddedJobFailure
 } from './embedding.mjs';
+import chalk from 'chalk';
 
 type Args = {
     help?: string;
@@ -158,7 +159,7 @@ async function main() {
     }), 'loading embedding model');
 
     // compute embeddings for each failed build
-    let spinner = ora('embedding builds');
+    let spinner = ora('embedding builds..');
     let logDir = new LogDir(args.outBaseDir);
     let buildIds = await logDir.listBuilds();
     let embedDir = new EmbedDir(args.outBaseDir);
@@ -178,7 +179,7 @@ async function main() {
     const issueEmbedder = new MemoizedEmbedder(embeddingContext);
 
     for (let [i, buildId] of buildIds.entries()) {
-        let prefix = `(${i}/${buildIds.length}) [suc:${skippedSuccessfulCt} prt:${skippedPartialCt} skip:${skippedAlreadyBuildCt}b/${skippedAlreadyJobCt}j emb:${embeddedBuildCt}b/${embeddedJobCt}j]`
+        let prefix = `(${i}/${buildIds.length}) [suc:${skippedSuccessfulCt} prt:${skippedPartialCt} cached:${skippedAlreadyBuildCt}b/${skippedAlreadyJobCt}j new:${embeddedBuildCt}b/${embeddedJobCt}j]`
         spinner.text = prefix;
 
         let build = await logDir.loadBuild(buildId);
@@ -194,7 +195,7 @@ async function main() {
         spinner.text = prefix + `: embedding build ${buildId}`;
         let timeline = await logDir.loadTimeline(buildId);
         if (timeline == null) {
-            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (timeline missing)`, symbol: '🟡' });
+            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (timeline missing)`, symbol: chalk.yellow('⏭') });
             // replace the spinner
             spinner = ora(spinner.text).start();
             skippedPartialCt++;
@@ -203,7 +204,7 @@ async function main() {
 
         let failedJobs = getLeafFailedJobs(timeline);
         if (failedJobs.length == 0) {
-            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (no failed leaf jobs)`, symbol: '🟡' });
+            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (no failed leaf jobs)`, symbol: chalk.yellow('⏭') });
             // replace the spinner
             spinner = ora(spinner.text).start();
             skippedSuccessfulCt++;
@@ -219,10 +220,13 @@ async function main() {
             }
             anyEmbed = true;
 
+            // save the inputs to a logfile
+            spinner.text = prefix + `: build ${buildId} job ${job.id} - saving raw inputs`;
+            embedDir.saveBuildJobRaw(buildId, job).catch(catchOra(spinner));
 
-            spinner.text = prefix + `: build ${buildId} job ${job.id} - ${job.failingIssueMessages.length} issues`;
+            spinner.text = prefix + `: build ${buildId} job ${job.id} - ${job.issues.length} issues`;
             let issueEmbeddings = await Promise.all(
-                job.failingIssueMessages.map((msg) => issueEmbedder.embed(msg))
+                job.issues.map((msg) => issueEmbedder.embed(msg))
             ).catch(catchOra(spinner));
             let logEmbedding = await (job.logId ? logDir.loadLog(buildId, job.logId).then(
                 (log) => {
@@ -250,8 +254,11 @@ async function main() {
         }
         if (anyEmbed) {
             embeddedBuildCt++;
+            spinner.succeed(`build id:${buildId} - done`);
+            spinner = ora(prefix).start();
         } else {
-            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (all jobs already embedded)`, symbol: '🟡' });
+            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (all jobs already embedded)`, symbol: chalk.yellow('⏭') });
+            spinner = ora(prefix).start();
         }
     }
 
