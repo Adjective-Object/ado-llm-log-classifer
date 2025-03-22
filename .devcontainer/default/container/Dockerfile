@@ -52,6 +52,10 @@ RUN curl -v https://codeberg.org/mergiraf/mergiraf/releases/download/v0.2.0/merg
 RUN tar -xvf ${HOME}/mergiraf.tar.gz -C ${HOME}/bin
 RUN rm ${HOME}/mergiraf.tar.gz
 
+# Set up difftastic for syntax-aware diffs
+RUN curl -L https://github.com/Wilfred/difftastic/releases/download/0.63.0/difft-x86_64-unknown-linux-gnu.tar.gz > ${HOME}/difft-aarch64-unknown-linux-gnu.tar.gz
+RUN tar -xvf ${HOME}/difft-aarch64-unknown-linux-gnu.tar.gz -C ${HOME}/bin
+
 # Configure mergiraf and difftastic
 COPY .gitattributes ${HOME}/.gitattributes
 COPY .gitconfig ${HOME}/.gitconfig
