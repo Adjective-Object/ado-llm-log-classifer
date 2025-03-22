@@ -137,9 +137,9 @@ function parseModelReference(reference: string): { repoName: string, pathInRepo:
 
 async function main() {
     const args = await parseArgs(
-        "classify-logs",
+        "embed-logs",
         argDescriptors,
-        (args: Partial<Args>) => path.join(args.outBaseDir ?? "out", "classify-logs-args.json"),
+        (args: Partial<Args>) => path.join(args.outBaseDir ?? "out", "embed-logs-args.json"),
     );
     if (args == null) {
         return;

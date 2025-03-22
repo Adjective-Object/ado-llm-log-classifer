@@ -5,7 +5,15 @@
     "test": "yarn build && node --experimental-vm-modules $(yarn bin jest)",
     "lint": "eslint . --ext .ts",
     "prettier": "prettier --write .",
-    "format": "npm run prettier"
+    "format": "npm run prettier",
+    "dl-logs": "yarn build && node --experimental-vm-modules $(yarn bin dl-logs)",
+    "embed-logs": "yarn build && node --experimental-vm-modules $(yarn bin embed-logs)",
+    "create-clusters": "yarn build && node --experimental-vm-modules $(yarn bin create-clusters)"
+  },
+  "bin": {
+    "create-clusters": "./lib/create-clusters.mjs",
+    "dl-logs": "./lib/dl-logs.mjs",
+    "embed-logs": "./lib/embed-logs.mjs"
   },
   "type": "module",
   "devDependencies": {

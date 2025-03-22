@@ -5,8 +5,8 @@ import * as fs from "node:fs";
 import { fileExists, dirExists, mkdirp } from "./fs-helpers.mjs";
 import { LlamaEmbedding } from "node-llama-cpp";
 import { FailedJob } from "timeline-helpers.mjs";
-import { ClusterDescriptor, JobReference } from "./cluster.mjs";
-import { dir } from "node:console";
+import { ClusterDescriptor } from "./cluster.mjs";
+import { asyncMapWithLimit } from "./async-map.mjs";
 
 async function saveObject(
     objPath: string,
@@ -63,15 +63,22 @@ export class LogDir {
             return [];
         }
         const buildDirs = await fs.promises.readdir(buildsDir);
-        return buildDirs.map((dir) => {
-            const dirNum = parseInt(dir);
-            if (isNaN(dirNum)) {
-                throw new Error(`Invalid build directory: ${dir}`);
-            }
-            return dirNum;
-        });
+        let results = await asyncMapWithLimit(
+            buildDirs,
+            async (dir) => {
+                // check if it is a directory
+                const dirPath = path.join(buildsDir, dir);
+                if (!(await fs.promises.stat(dirPath)).isDirectory()) {
+                    return null
+                }
+                const dirNum = parseInt(dir);
+                if (isNaN(dirNum)) {
+                    throw new Error(`Invalid build directory: ${dir}`);
+                }
+                return dirNum;
+            });
+        return results.filter((result) => result !== null) as number[];
     }
-
 
     async saveTimeline(buildId: number, timeline: unknown) {
         const timelinePath = path.join(this.getLogDirForBuild(buildId), 'timeline.json');
