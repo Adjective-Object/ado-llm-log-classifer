@@ -3,6 +3,7 @@
   "scripts": {
     "build": "tsc",
     "test": "yarn build && node --experimental-vm-modules $(yarn bin jest)",
+    "jest": "node --experimental-vm-modules $(yarn bin jest)",
     "lint": "eslint . --ext .ts",
     "prettier": "prettier --write .",
     "format": "npm run prettier",
