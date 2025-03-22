@@ -1,4 +1,10 @@
 {
+    "terminal.integrated.defaultProfile.linux": "fish",
+    "terminal.integrated.allowChords": false,
+    "terminal.integrated.shellIntegration.decorationsEnabled": "never",
+    "terminal.integrated.shellIntegration.enabled": false,
+    "editor.formatOnSave": true,
+    "files.autoSaveWorkspaceFilesOnly": true,
     "search.useIgnoreFiles": false,
     "search.exclude": {
         "**/node_modules": true,
