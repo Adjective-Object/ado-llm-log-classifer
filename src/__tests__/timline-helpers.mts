@@ -45,7 +45,6 @@ describe("getLeafFailureRecords", () => {
                 {
                     "previousAttempts": [],
                     "id": "id-4",
-                    "parentId": null,
                     "type": "Stage",
                     "name": "Main",
                     "state": 2,
