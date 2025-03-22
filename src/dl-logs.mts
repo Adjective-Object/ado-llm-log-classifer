@@ -1,6 +1,4 @@
-import minimist from 'minimist';
-import input from "@inquirer/input";
-import ora, { type Ora } from 'ora';
+import ora from 'ora';
 import * as ado from 'azure-devops-node-api';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -11,20 +9,61 @@ import type { IRequestOptions, IRestResponse } from 'typed-rest-client';
 import type { GitRepository } from 'azure-devops-node-api/interfaces/GitInterfaces.js';
 import { LogDir } from './LogDir.mjs';
 import { getLeafFailedLogIds } from './timeline-helpers.mjs';
-import { mkdirp } from './fs-helpers.mjs';
 import { catchOra } from './ora-helpers.mjs';
-
+import { parseArgs, type ArgDescriptors } from './args.mjs';
+import { withOra } from './ora-helpers.mjs';
 
 type Args = {
-    help: boolean;
+    help?: string;
     patToken: string;
     orgName: string;
     projectName: string;
     repo: string;
     branch: string;
-    out: string;
+    outBaseDir: string;
     continuationToken?: string;
 };
+
+const argDescriptors: ArgDescriptors<Args> = {
+    help: {
+        shortName: 'h',
+        helpDescription: 'Print this help message',
+    },
+    patToken: {
+        shortName: 'p',
+        helpDescription: 'Azure DevOps Personal Access Token',
+        missingPrompt: 'ADO Access Token (with build:read and code:read)',
+    },
+    orgName: {
+        shortName: 'n',
+        helpDescription: 'Azure DevOps Organization Name',
+        missingPrompt: 'ADO Organization Name',
+    },
+    projectName: {
+        shortName: 'j',
+        helpDescription: 'Azure DevOps Project Name',
+        missingPrompt: 'ADO Project Name',
+    },
+    repo: {
+        shortName: 'r',
+        helpDescription: 'Azure DevOps Repository Name',
+        missingPrompt: 'ADO Repository Name',
+    },
+    branch: {
+        shortName: 'br',
+        helpDescription: 'Azure DevOps Branch Name',
+        missingPrompt: 'ADO Branch Name',
+    },
+    outBaseDir: {
+        shortName: 'o',
+        helpDescription: 'The base directory to save the output files',
+        default: "./out",
+    },
+    continuationToken: {
+        shortName: 'c',
+        helpDescription: 'Continuation token for pagination',
+    },
+}
 
 function printHelp() {
     console.log("Usage: node src/index.js [options]");
@@ -76,7 +115,7 @@ function fileExists(filePath: string): Promise<boolean> {
 }
 
 function getBuildDir(args: Args, buildId: number): string {
-    return path.join(args.out, "logs", buildId.toString());
+    return path.join(args.outBaseDir, "logs", buildId.toString());
 }
 
 async function downloadLogContent(args: Args, buildAPI: IBuildApi, logDir: LogDir, buildId: number, logId: number): Promise<boolean> {
@@ -100,99 +139,15 @@ async function getTimeline(args: Args, logDir: LogDir, buildAPI: IBuildApi, buil
     return [timeline, true];
 }
 
-async function getArgs(): Promise<Args | null> {
-    let pArgs = minimist(process.argv.slice(2), {
-        alias: {
-            h: "help",
-            p: "patToken",
-            br: "branch",
-            n: "orgName",
-            j: "projectName",
-            r: "repo",
-            o: "out",
-            c: "continuationToken",
-        },
-    });
-
-    if (pArgs.help) {
-        printHelp();
-        return null
-    }
-
-    if (!pArgs.out) {
-        pArgs.out = './out';
-    }
-
-    // check if the out directory exists, if not create it
-    await mkdirp(pArgs.out);
-    // check if the args.json file exists, if so, read it and parse it
-    const argsFilePath = path.join(pArgs.out, "dl-logs-args.json");
-    if (await fileExists(argsFilePath)) {
-        let args = await fs.promises.readFile(argsFilePath, "utf-8");
-        let argsObj = JSON.parse(args);
-        for (let key in argsObj) {
-            if (!Object.hasOwnProperty.call(pArgs, key)) {
-                // @ts-ignore
-                console.log(`Using saved value for args.${key} from args file`);
-                pArgs[key] = argsObj[key];
-            }
-        }
-    }
-
-
-    // prompt the user for missing fields
-    if (!pArgs.patToken) {
-        pArgs.patToken = await input({
-            message: "ADO PAT token (with build:read and code:read access):",
-            required: true,
-        });
-    }
-    if (!pArgs.orgName) {
-        pArgs.orgName = await input({
-            message: "ADO organization",
-            required: true,
-        });
-    }
-    if (!pArgs.projectName) {
-        pArgs.projectName = await input({
-            message: "ADO project name",
-            required: true,
-        });
-    }
-    if (!pArgs.repo) {
-        pArgs.repo = await input({
-            message: `Repository from ${pArgs.orgName}`,
-            required: true,
-        });
-    }
-    if (!pArgs.branch) {
-        pArgs.branch = await input({
-            message: `Branch of ${pArgs.orgName}:${pArgs.projectName}/${pArgs.repo}`,
-            required: true,
-        });
-    }
-
-    // assert all fields of pArgs are populated
-    delete (pArgs as any)["_"];
-    delete (pArgs as any)["--"];
-    let args: Args = pArgs as unknown as Args;
-
-    console.log("Arguments:\n" + Object.entries(args).map(([k, v]) => `  ${k}: ${v}`).join("\n"));
-
-    console.log("saving arguments for future runs...")
-    // save the arguments to a json file in the out directory
-    await fs.promises.mkdir(args.out, { recursive: true });
-    await fs.promises.writeFile(argsFilePath, JSON.stringify(args, null, 2));
-
-    return args
-}
-
 async function main() {
-    let a = await getArgs();
-    if (a == null) {
+    let args = await parseArgs(
+        'dl-logs',
+        argDescriptors,
+        (args: Partial<Args>) => path.join(args.outBaseDir ?? "out", "dl-logs-args.json"),
+    );
+    if (args == null) {
         return;
     }
-    let args: Args = a;
 
     // Create ADO client
     console.log("Getting build metadata...");
@@ -228,7 +183,7 @@ async function main() {
     // start bulk downloading the logs
     console.log("Starting bulk download of logs...");
 
-    let logDir = new LogDir(args.out);
+    let logDir = new LogDir(args.outBaseDir);
 
     let continuationToken: string | undefined = args.continuationToken;
     let page = 0;
@@ -239,10 +194,9 @@ async function main() {
 
         // get the logs page and save its continuation token for the next loop
         console.log(`continuationToken=${continuationToken}`)
-        let pageSpinner = ora(`pg:${page} fetching page`).start();
-        let builds: PagedList<bi.Build> = await getBuildsPage(args, buildAPI, targetRepo, continuationToken).catch(catchOra(pageSpinner));
-        pageSpinner.succeed(
-            `pg:${page} fetched ${builds.length} builds`,
+        let builds: PagedList<bi.Build> = await withOra(
+            getBuildsPage(args, buildAPI, targetRepo, continuationToken),
+            `pg:${page} fetching page`,
         );
         continuationToken = lastContinuationToken;
 
@@ -294,8 +248,8 @@ async function main() {
                         skipCount++;
                     }
                 }
-                buildSpinner.succeed(`build:${buildCt} (id:${build.id}) downloaded ${leafFailedLogIds.length} logs (${skipCount} skipped).${!timelineWasDownloaded ? " (timeline skipped)" : ""
-                    }`);
+                buildSpinner.succeed(
+                    `build:${buildCt} (id:${build.id}) downloaded ${leafFailedLogIds.length} logs (${skipCount} skipped).${!timelineWasDownloaded ? " (timeline skipped)" : ""}`);
             }
         }
 
@@ -305,7 +259,6 @@ async function main() {
     console.log("\nFinished downloading logs");
 }
 
-// if __name__ == "__main__": for node
 main().then(() => {
     console.log("done");
 }, (err) => {
