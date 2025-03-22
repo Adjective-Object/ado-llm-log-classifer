@@ -9,6 +9,10 @@ Open in devcontainer
 git config --local user.email "your@email"
 git config --local user.name "Your Name"
 
+Generate access tokens at:
+- huggingface: https://huggingface.co/settings/tokens (repo:read access to all public gated repos you can access)
+- ado: <orgname>.visualstudio.com/_usersSettings/tokens (build:read and code: read access)
+
 # useful scripts
 ```sh
 # Builds and runs tests.
