@@ -5,6 +5,8 @@ import * as fs from "node:fs";
 import { fileExists, dirExists, mkdirp } from "./fs-helpers.mjs";
 import { LlamaEmbedding } from "node-llama-cpp";
 import { FailedJob } from "timeline-helpers.mjs";
+import { ClusterDescriptor, JobReference } from "./cluster.mjs";
+import { dir } from "node:console";
 
 async function saveObject(
     objPath: string,
@@ -41,6 +43,12 @@ export class LogDir {
     getEmbedsDirForBuild(buildId: number) {
         return path.join(this.getBase(), buildId.toString());
     }
+    private logName(logId: number) {
+        return `log-${logId}.txt`;
+    }
+    getPathForBuildLog(buildId: number, logId: number) {
+        return path.join(this.getLogDirForBuild(buildId), this.logName(logId));
+    }
 
     async saveBuild(buildId: number, build: Build) {
         await saveObject(path.join(this.getLogDirForBuild(buildId), "build.json"), build)
@@ -73,15 +81,12 @@ export class LogDir {
         return await loadObject(path.join(this.getLogDirForBuild(buildId), 'timeline.json'));
     }
 
-    private logName(logId: number) {
-        return `log-${logId}.txt`;
-    }
     async saveLog(
         buildId: number,
         logId: number,
         logContentStream: NodeJS.ReadableStream,
     ) {
-        const logPath = path.join(this.getLogDirForBuild(buildId), this.logName(logId));
+        const logPath = this.getPathForBuildLog(buildId, logId);
         const logPartPath = logPath + ".part";
         // streaming write the log content stream to a file
         let logFile = fs.createWriteStream(logPartPath);
@@ -123,10 +128,36 @@ export class LogDir {
     }
 }
 
+
+async function* listAllBuildJobEmbeddings(d: EmbedDir) {
+    const baseDir = d.getBase();
+    if (!await dirExists(baseDir)) {
+        return;
+    }
+
+    const embedFiles = await fs.promises.readdir(baseDir);
+    for (let file of embedFiles) {
+        // read the directory
+        const buildDir = path.join(baseDir, file);
+        if (!await dirExists(buildDir)) {
+            continue;
+        }
+        const jobEmbedFiles = await fs.promises.readdir(buildDir);
+        for (let jobEmbedFile of jobEmbedFiles) {
+            if (jobEmbedFile.startsWith('embed-') && jobEmbedFile.endsWith('.json')) {
+                yield {
+                    buildId: parseInt(file),
+                    jobId: parseInt(jobEmbedFile.replace(/^embed-/, '').replace(/\.json$/, '')),
+                };
+            }
+        }
+    }
+}
+
 export class EmbedDir {
     constructor(private outDir: string) { }
 
-    private getBase() {
+    getBase() {
         return path.join(this.outDir, 'embed');
     }
 
@@ -158,6 +189,10 @@ export class EmbedDir {
     ): Promise<boolean> {
         return await fileExists(this.getEmbedFileForBuildJob(buildId, jobId));
     }
+    listAllBuildJobEmbeddings() {
+        return listAllBuildJobEmbeddings(this);
+    }
+
     async loadBuildJobEmbeddings(
         buildId: number,
         jobId: number,
@@ -190,5 +225,36 @@ export class EmbedDir {
         jobId: number,
     ): Promise<FailedJob | undefined> {
         return await loadObject(this.getRawFileForBuildJob(buildId, jobId));
+    }
+}
+
+export class ClustersDir {
+    constructor(private outDir: string) { }
+
+    private getBase() {
+        return path.join(this.outDir, 'clusters');
+    }
+
+    getDirForCluster(clusterName: string) {
+        return path.join(this.getBase(), 'cluster-' + clusterName);
+    }
+    getPathForClusterDescriptor(clusterName: string) {
+        return path.join(this.getDirForCluster(clusterName), 'cluster.json');
+    }
+
+    async saveClusterDescriptor(clusterName: string, cluster: ClusterDescriptor) {
+        await saveObject(this.getDirForCluster(clusterName), cluster);
+    }
+    async loadClusterDescriptor(clusterName: string): Promise<ClusterDescriptor | undefined> {
+        return await loadObject(this.getDirForCluster(clusterName));
+    }
+    async listClusters(): Promise<string[]> {
+        const clustersDir = this.getBase();
+        if (!await dirExists(clustersDir)) {
+            return [];
+        }
+        return await fs.promises.readdir(clustersDir).then(dirs => dirs.map(
+            dir => dir.replace(/^cluster-/, '')
+        ));
     }
 }

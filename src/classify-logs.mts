@@ -222,7 +222,15 @@ async function main() {
 
             // save the inputs to a logfile
             spinner.text = prefix + `: build ${buildId} job ${job.id} - saving raw inputs`;
-            embedDir.saveBuildJobRaw(buildId, job).catch(catchOra(spinner));
+            // hack: add the log path to the job object for debugging
+            let extJob = {
+                ...job,
+            }
+            if (job.logId) {
+                let logPath = await logDir.getPathForBuildLog(buildId, job.logId);
+                (extJob as any).logPath = logPath;
+            }
+            embedDir.saveBuildJobRaw(buildId, extJob).catch(catchOra(spinner));
 
             spinner.text = prefix + `: build ${buildId} job ${job.id} - ${job.issues.length} issues`;
             let issueEmbeddings = await Promise.all(
@@ -262,7 +270,10 @@ async function main() {
         }
     }
 
-    spinner.succeed(`embedding complete (${embeddedBuildCt}/${buildIds.length} builds)`);
+    spinner.succeed(`finished embedding builds (${embeddedBuildCt}/${buildIds.length} builds)`);
+
+    // embed reference logs
+
 }
 
 main().catch((err) => {

@@ -1,0 +1,100 @@
+import { EmbeddedJobFailure } from "embedding.mjs";
+
+// References a failed job and the build it was a part of.
+export type JobReference = {
+    buildId: number;
+    jobId: number;
+}
+
+export type ClusterDescriptor = {
+    // Name of this cluster
+    name: string;
+    // Set of references to the jobs that define members of this cluster.
+    //
+    // New jobs that are sufficiently cosine-similar to both the issues and
+    // the log text of the jobs in this cluster will be considered members
+    // of this cluster.
+    referenceJobs: JobReference[];
+}
+
+function issueSimilarity(job1: EmbeddedJobFailure, job2: EmbeddedJobFailure) {
+    let maxSimilarity = 0.0;
+    for (const issue of job1.issues) {
+        for (const refIssue of job2.issues) {
+            maxSimilarity = Math.max(maxSimilarity, issue.calculateCosineSimilarity(refIssue));
+        }
+    }
+    return maxSimilarity;
+}
+
+export type CombinedSimilarity = {
+    issuesSimilarity: number;
+    logSimilarity: number;
+    combined: number;
+}
+
+export class Cluster {
+    constructor(
+        public name: string,
+        public referenceJobs: EmbeddedJobFailure[],
+    ) { }
+
+
+    getIssuesSimilarity(
+        job: EmbeddedJobFailure,
+    ) {
+        // Find the maximum similarity between any two issue messages
+        // between all reference jobs that define this cluster and
+        // the passed-in job.
+        let maxSim = 0.0;
+        for (const refJob of this.referenceJobs) {
+            maxSim = Math.max(maxSim, issueSimilarity(job, refJob));
+        }
+
+        return maxSim;
+    }
+
+    getLogSimilarity(
+        job: EmbeddedJobFailure,
+    ) {
+        // Find the maximum similarity between the log messages of all
+        // reference jobs that define this cluster and the passed-in job.
+        let maxSim = 0.0;
+        for (const refJob of this.referenceJobs) {
+            maxSim = Math.max(maxSim, job.log!.calculateCosineSimilarity(refJob.log!));
+        }
+
+        return maxSim;
+    }
+
+    getSimilarity(
+        job: EmbeddedJobFailure,
+    ): CombinedSimilarity {
+        const issuesSimilarity = this.getIssuesSimilarity(job);
+        const logSimilarity = this.getLogSimilarity(job);
+        return {
+            issuesSimilarity,
+            logSimilarity,
+            combined: (issuesSimilarity + logSimilarity) / 2,
+        };
+    }
+
+    // Gets the average similarity between the reference jobs in the cluster
+    getSelfSimilarity() {
+        let sum = 0.0;
+        let count = 0;
+        for (let i = 0; i < this.referenceJobs.length; i++) {
+            for (let j = 0; j < this.referenceJobs.length; j++) {
+                if (i == j) {
+                    continue;
+                }
+                sum += issueSimilarity(this.referenceJobs[i], this.referenceJobs[j]);
+                count++;
+            }
+        }
+        if (count == 0) {
+            return 0;
+        }
+        return sum / count;
+    }
+}
