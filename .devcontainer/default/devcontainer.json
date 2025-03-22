@@ -1,0 +1,59 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/refs/heads/main/schemas/devContainer.base.schema.json",
+  "name": "${localWorkspaceFolderBasename} (docker)",
+  "build": {
+    "dockerfile": "./container/Dockerfile",
+    "args": {
+      "USERNAME": "ubuntu",
+      // In a dev container, we want the acting user's UID to match the user we are launching
+      // docker/podman from. This is typically 1000 on for a single-user linux system, or within
+      // WSL
+      //
+      // This is because mounted volumes from Linux retain their original file permissions,
+      // including the UID.
+      //
+      // If the acting user does not have the same UID as the user in the container, the container
+      // may not have permission to write to the mounted volume, or may mangle the permissions
+      // of mounted files.
+      //
+      // See https://github.com/microsoft/vscode-dev-containers/issues/108
+      "USER_UID": "${localEnv:KDE_SESSION_UID:1000}"
+    }
+  },
+  "remoteUser": "ubuntu",
+  // see https://github.com/microsoft/vscode-remote-release/issues/1333#issuecomment-528234042
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind,consistency=delegated",
+  "mounts": [
+    // expose the user's ssh credentials to the dev container
+    "source=${localEnv:HOME}/.ssh,target=/home/ubuntu/.ssh,type=bind,consistency=cached",
+    // map the .persist directory to /cache so it can be persisted between container rebuilds.
+    // This persists shell history as well as downloaded cargo crate sources.
+    "source=${localWorkspaceFolder}/.persist,target=/cache,type=bind,consistency=cached"
+  ],
+  "capAdd": [
+    // required for e.g. perf monitoring
+    "PERFMON",
+    "SYS_PTRACE"
+  ],
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "vadimcn.vscode-lldb",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "rust-analyzer.server.path": "/home/ubuntu/.cargo/bin/rust-analyzer"
+      }
+    }
+  },
+  "remoteEnv": {
+    "VM_REPO_PATH": "/workspaces/${localWorkspaceFolderBasename}"
+  },
+  "forwardPorts": [
+    3000,
+    3001
+  ]
+}
