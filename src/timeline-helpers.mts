@@ -1,50 +1,133 @@
 import { type Timeline, type TimelineRecord, IssueType, TaskResult } from "azure-devops-node-api/interfaces/BuildInterfaces.js";
 
+class TimelineGraph {
+    public idToTaskIdx: Map<string, number> = new Map<string, number>();
+
+    constructor(public records: TimelineRecord[]) {
+        this.records = records;
+        this.idToTaskIdx = new Map<string, number>()
+        for (let idx = 0; idx < records.length; idx++) {
+            let rId = records[idx].id;
+            if (rId == null) {
+                continue;
+            }
+            this.idToTaskIdx.set(rId, idx);
+        }
+    }
+
+    lookupTask(id: string | undefined): TimelineRecord | null {
+        if (id == null) {
+            return null;
+        }
+        let idx = this.idToTaskIdx.get(id);
+        if (idx == null) {
+            return null;
+        }
+        return this.records[idx];
+    }
+
+    findLeaves(
+        subsetIds: Set<string>,
+    ): Set<string> {
+        let records = this.records.filter((record) => record.id && subsetIds.has(record.id));
+
+        // avoid including parent records in the frontier
+        let nonLeafRecords = new Set();
+        for (let record of records) {
+            if (record.parentId != null) {
+                nonLeafRecords.add(record.parentId);
+            }
+        }
+        let leafRecords = new Set<string>();
+        for (let record of records) {
+            if (record.id && !nonLeafRecords.has(record.id)) {
+                leafRecords.add(record.id);
+            }
+        }
+        return leafRecords
+    }
+}
+
+function isFailure(record: TimelineRecord): boolean {
+    return record.result == TaskResult.Failed ||
+        record.result == TaskResult.Canceled ||
+        (record.issues?.some((issue) => issue.type == IssueType.Error) ?? false)
+}
+
 export function getLeafFailureRecords(
     timeline: Timeline,
 ): number[] {
-    let records = timeline.records ?? [];
-    // avoid including parent records in the frontier
-    let allParentTimelineEntryRecords = new Set();
-    let allTimelineEntryResults = new Map<string, TaskResult>()
-    for (let record of records) {
-        if (record.parentId != null) {
-            allParentTimelineEntryRecords.add(record.parentId);
-        }
-        if (record.id && record.result) {
-            allTimelineEntryResults.set(record.id, record.result);
+    if (!timeline.records) {
+        return [];
+    }
+    let records = timeline.records;
+    let graph = new TimelineGraph(records);
+
+    let allTaskIds = new Set(
+        records.map((record) => record.id)
+            .filter((id): id is string => typeof id == "string"));
+
+    // find the subgraph that only contains non-succesful tasks
+    // and their parents
+    let failingSubtree = new Set<string>();
+    for (let id of graph.findLeaves(allTaskIds)) {
+        let head: string | null | undefined = id;
+        let failureBranch = false;
+        while (head && !failingSubtree.has(head)) {
+            let timelineEntry = graph.lookupTask(head);
+            if (timelineEntry == null || timelineEntry.id == null) {
+                break;
+            }
+            failureBranch = failureBranch || isFailure(timelineEntry);
+            if (failureBranch) {
+                failingSubtree.add(timelineEntry.id);
+            }
+            head = timelineEntry.parentId;
         }
     }
-    type RecordTuple = [TimelineRecord, number];
 
-    function traverseParentRecordHasCancellationFailure(id: string) {
+    // Checks if the task failed is a cancellation failure
+    // i.e. the task was cancelled, and is the child of a task that failed
+    // or is itself a cancellation failure
+    function isIndirectCancellationFailure(id: string | undefined) {
         let head: string | null | undefined = id;
         while (head) {
-            if (allTimelineEntryResults.get(head) == TaskResult.Failed) {
+            let timelineEntry = graph.lookupTask(head);
+            if (timelineEntry == null) {
+                return false;
+            }
+
+            if (isFailure(timelineEntry)) {
                 return true;
-            } else if (allTimelineEntryResults.get(head) == TaskResult.Canceled) {
-                head = records.find((record) => record.id == head)?.parentId;
+            } else if (timelineEntry.result == TaskResult.Canceled) {
+                head = timelineEntry.parentId;
             } else {
                 return false
             }
         }
     }
 
-    let leafFailedRecordIdxes = (timeline.records ?? [])
-        .map((record, i) => [record, i] as RecordTuple)
-        .filter(([record,]) =>
-            // only report leaf failures, becasue we reconstruct the issue chain
-            // for any other failing issues
-            !allParentTimelineEntryRecords.has(record.id) &&
-            (
-                // The task itself failed
-                record.result == TaskResult.Failed ||
-                // or, the task was canceled and the parent either failed or was itself cancelled:
-                // this timed out and we should consider it a "leaf" failure
-                record.result == TaskResult.Canceled && traverseParentRecordHasCancellationFailure(record.id!)
-            ))
-        .map(([, idx]) => idx)
-    return leafFailedRecordIdxes
+    let failingLeaves = Array.from(graph.findLeaves(failingSubtree)).filter((id) => {
+        let record = graph.lookupTask(id);
+        if (record == null) {
+            return false;
+        }
+        // check if the task is a cancellation failure or is itself a failure
+        if (isFailure(record) || isIndirectCancellationFailure(record.id)) {
+            return true;
+        }
+        return false;
+    });
+
+    // return the indexes of the failing leaves
+    let failingLeavesIdx = failingLeaves.map((id) => {
+        let idx = graph.idToTaskIdx.get(id);
+        if (idx == null) {
+            return -1;
+        }
+        return idx;
+    }).filter((idx) => idx >= 0);
+    return failingLeavesIdx;
 }
 
 
