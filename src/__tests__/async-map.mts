@@ -21,4 +21,26 @@ describe('async-map', () => {
             22, 24, 26, 28, 30, 32, 34, 36, 38, 40
         ]);
     });
+
+
+    it('should map async functions with limit=1', async () => {
+        const items = [1, 2, 3, 4, 5];
+        const fn = async (item: number) => {
+            return new Promise<number>((resolve) => {
+                // Simulate async work that may not complete in order.
+                //
+                // TODO: don't use timeout here because it makes the test slower
+                setTimeout(() => {
+                    resolve(item * 2);
+                }, Math.random() * 2);
+            });
+        };
+        const results = await asyncMapWithLimit(items, fn, 1);
+        expect(results).toEqual([2, 4, 6, 8, 10]);
+    });
+
+    it('should throw an error if concurrentLimit is less than 1', async () => {
+        const items = [1, 2, 3, 4, 5];
+        expect(asyncMapWithLimit(items, async (item) => item, 0)).rejects.toThrow('concurrentLimit must be 1 or more');
+    });
 });

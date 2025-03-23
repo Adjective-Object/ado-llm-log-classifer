@@ -9,12 +9,14 @@
     "format": "npm run prettier",
     "dl-logs": "yarn build && node --experimental-vm-modules $(yarn bin dl-logs)",
     "embed-logs": "yarn build && node --experimental-vm-modules $(yarn bin embed-logs)",
-    "create-clusters": "yarn build && node --experimental-vm-modules $(yarn bin create-clusters)"
+    "create-clusters": "yarn build && node --experimental-vm-modules $(yarn bin create-clusters)",
+    "make-csv": "yarn build && node --experimental-vm-modules $(yarn bin make-csv)"
   },
   "bin": {
     "create-clusters": "./lib/bin/create-clusters.mjs",
     "dl-logs": "./lib/bin/dl-logs.mjs",
-    "embed-logs": "./lib/bin/embed-logs.mjs"
+    "embed-logs": "./lib/bin/embed-logs.mjs",
+    "make-csv": "./lib/bin/make-csv.mjs"
   },
   "type": "module",
   "devDependencies": {

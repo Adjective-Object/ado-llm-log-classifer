@@ -1785,6 +1785,7 @@ __metadata:
     create-clusters: ./lib/bin/create-clusters.mjs
     dl-logs: ./lib/bin/dl-logs.mjs
     embed-logs: ./lib/bin/embed-logs.mjs
+    make-csv: ./lib/bin/make-csv.mjs
   languageName: unknown
   linkType: soft
 

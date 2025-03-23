@@ -252,8 +252,7 @@ async function main() {
             } else {
                 // download the logs for this build
                 let skipCount = 0
-                for (let [i, id] of leafFailedLogIds.entries()) {
-                    let failedLogID = leafFailedLogIds[i];
+                for (let [i, failedLogID] of leafFailedLogIds.entries()) {
                     buildSpinner.text = `build:${buildCt} (id:${build.id}) log:${i + 1}/${leafFailedLogIds.length} (id:${failedLogID})`;
                     let wasDownloaded = await downloadLogContent(args, buildAPI, logDir, buildId, failedLogID).catch(catchOra(buildSpinner));
                     if (wasDownloaded) {

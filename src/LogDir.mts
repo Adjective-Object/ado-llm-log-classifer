@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import { fileExists, dirExists, mkdirp } from "./fs-helpers.mjs";
 import { LlamaEmbedding } from "node-llama-cpp";
 import { FailedJob } from "timeline-helpers.mjs";
-import { Cluster, ClusterDescriptor } from "./cluster.mjs";
+import { Cluster, ClusterDescriptor, JobReference } from "./cluster.mjs";
 import { asyncMapWithLimit } from "./async-map.mjs";
 
 async function saveObject(
@@ -167,7 +167,7 @@ export class LogDir {
 }
 
 
-async function* listAllBuildJobEmbeddings(d: EmbedDir) {
+async function* listAllBuildJobEmbeddings(d: EmbedDir): AsyncGenerator<JobReference> {
     const baseDir = d.getBase();
     if (!await dirExists(baseDir)) {
         return;
@@ -339,7 +339,9 @@ export class ClustersDir {
     ): Promise<Map<string, Cluster>> {
         let clusters = new Map<string, Cluster>();
         let clusterNames = await this.listClusters();
+        console.log('x');
         await asyncMapWithLimit(clusterNames, async (clusterName) => {
+            console.log('a');
             let descriptor = await this.loadClusterDescriptor(clusterName);
             if (descriptor == null) {
                 console.warn(`Could not load cluster descriptor for cluster ${clusterName}, is it malformed on disk?`);
