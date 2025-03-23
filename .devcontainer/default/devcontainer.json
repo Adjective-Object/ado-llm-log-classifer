@@ -49,6 +49,11 @@
       }
     }
   },
+  "runArgs": [
+    // pass through GPUs to the container
+    "--gpus",
+    "all"
+  ],
   "remoteEnv": {
     "VM_REPO_PATH": "/workspaces/${localWorkspaceFolderBasename}"
   },

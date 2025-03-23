@@ -6,7 +6,7 @@ import { BuildResult } from 'azure-devops-node-api/interfaces/BuildInterfaces.js
 import { parseArgs, type ArgDescriptors } from './args.mjs';
 import ora from 'ora';
 import { fileExists, mkdirp } from './fs-helpers.mjs';
-import { getLlama } from "node-llama-cpp";
+import { getLlama, LlamaGpuType } from "node-llama-cpp";
 import { EmbedDir, LogDir } from './LogDir.mjs';
 import { getLeafFailedJobs } from './timeline-helpers.mjs';
 import { catchOra, withOra } from './ora-helpers.mjs';
@@ -16,13 +16,15 @@ import {
     tokenizeAndChunkText,
     type EmbeddedJobFailure
 } from './embedding.mjs';
-import chalk from 'chalk';
+import color from 'cli-color';
+import { filesize } from 'filesize';
 
 type Args = {
     help?: string;
     hfToken: string;
     hfEmbeddingModel: string;
     outBaseDir: string;
+    gpu: string;
 };
 const argDescriptors: ArgDescriptors<Args> = {
     help: {
@@ -49,6 +51,11 @@ const argDescriptors: ArgDescriptors<Args> = {
         helpDescription: 'The base directory to save the output files',
         default: "./out",
     },
+    gpu: {
+        shortName: 'g',
+        helpDescription: 'node-llama-cpp GPU mode (auto,metal,cuda,vulkan,false)',
+        default: "auto",
+    }
 };
 
 
@@ -135,6 +142,20 @@ function parseModelReference(reference: string): { repoName: string, pathInRepo:
     };
 }
 
+function validateGpu(gpu: string): 'auto' | LlamaGpuType {
+    switch (gpu) {
+        case 'metal':
+        case 'cuda':
+        case 'vulkan':
+        case 'auto':
+            return gpu;
+        case 'false':
+            return false;
+        default:
+            throw new Error(`Invalid GPU type: ${gpu}`);
+    }
+}
+
 async function main() {
     const args = await parseArgs(
         "embed-logs",
@@ -146,6 +167,7 @@ async function main() {
     }
 
     console.log("Arguments:\n" + Object.entries(args).map(([k, v]) => `  ${k}: ${v}`).join("\n"));
+    let gpu = validateGpu(args.gpu);
 
     // download the embedding model
     let { repoName: embeddingRepo, pathInRepo: embeddingPath } = parseModelReference(args.hfEmbeddingModel);
@@ -153,7 +175,11 @@ async function main() {
     console.log(`Downloaded embedding model to ${embeddingModelPath}`);
 
     // Load the embedding model in to llama-cpp
-    let llama = await withOra(getLlama(), 'loading llama-cpp');
+    let llama = await withOra(getLlama({
+        gpu: gpu,
+    }), 'loading llama-cpp');
+    console.log(`Loaded llama-cpp. gpu: ${llama.gpu ? 'yes' : 'no'}, max-threads: ${llama.maxThreads}`);
+
     let model = await withOra(llama.loadModel({
         modelPath: embeddingModelPath,
     }), 'loading embedding model');
@@ -180,7 +206,7 @@ async function main() {
 
     for (let [i, buildId] of buildIds.entries()) {
         let prefix = `(${i}/${buildIds.length}) [suc:${skippedSuccessfulCt} prt:${skippedPartialCt} cached:${skippedAlreadyBuildCt}b/${skippedAlreadyJobCt}j new:${embeddedBuildCt}b/${embeddedJobCt}j]`
-        spinner.text = prefix;
+        spinner.text = prefix + ": loading build..";
 
         let build = await logDir.loadBuild(buildId);
         if (build == null) {
@@ -195,7 +221,7 @@ async function main() {
         spinner.text = prefix + `: embedding build ${buildId}`;
         let timeline = await logDir.loadTimeline(buildId);
         if (timeline == null) {
-            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (timeline missing)`, symbol: chalk.yellow('⏭') });
+            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (timeline missing)`, symbol: color.yellow('⏭') });
             // replace the spinner
             spinner = ora(spinner.text).start();
             skippedPartialCt++;
@@ -204,7 +230,7 @@ async function main() {
 
         let failedJobs = getLeafFailedJobs(timeline);
         if (failedJobs.length == 0) {
-            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (no failed leaf jobs)`, symbol: chalk.yellow('⏭') });
+            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (no failed leaf jobs)`, symbol: color.yellow('⏭') });
             // replace the spinner
             spinner = ora(spinner.text).start();
             skippedSuccessfulCt++;
@@ -221,7 +247,7 @@ async function main() {
             anyEmbed = true;
 
             // save the inputs to a logfile
-            spinner.text = prefix + `: build ${buildId} job ${job.id} - saving raw inputs`;
+            spinner.text = prefix + `: build ${buildId} job:${job.id}/log:${job.logId} - saving raw inputs`;
             // hack: add the log path to the job object for debugging
             let extJob = {
                 ...job,
@@ -232,7 +258,7 @@ async function main() {
             }
             embedDir.saveBuildJobRaw(buildId, extJob).catch(catchOra(spinner));
 
-            spinner.text = prefix + `: build ${buildId} job ${job.id} - ${job.issues.length} issues`;
+            spinner.text = prefix + `: build ${buildId} job:${job.id}/log:${job.logId} - ${job.issues.length} issues`;
             let issueEmbeddings = await Promise.all(
                 job.issues.map((msg) => issueEmbedder.embed(msg))
             ).catch(catchOra(spinner));
@@ -242,12 +268,12 @@ async function main() {
                         return null;
                     }
                     let chunks = tokenizeAndChunkText(log, embeddingContext);
-                    spinner.text = prefix + `: embedding build ${buildId} job ${job.id} log (${chunks.length} chunks)`;
+                    spinner.text = prefix + `: embedding build ${buildId} job:${job.id}/log:${job.logId} (${chunks.length} chunks, ${filesize(log.length)})`;
                     return embedChunkedTokens(chunks, embeddingContext);
                 }
             ) : null)?.catch(catchOra(spinner));
 
-            spinner.text = prefix + `: embedding build ${buildId} job ${job.id} -- saving`;
+            spinner.text = prefix + `: embedding build ${buildId} job:${job.id}/log:${job.logId} -- saving`;
 
             // save the embeddings
             let toSave: EmbeddedJobFailure = {
@@ -265,7 +291,7 @@ async function main() {
             spinner.succeed(`build id:${buildId} - done`);
             spinner = ora(prefix).start();
         } else {
-            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (all jobs already embedded)`, symbol: chalk.yellow('⏭') });
+            spinner.stopAndPersist({ text: `build id:${buildId} - skipped (all jobs already embedded)`, symbol: color.yellow('⏭') });
             spinner = ora(prefix).start();
         }
     }

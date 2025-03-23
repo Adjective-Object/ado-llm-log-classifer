@@ -1,5 +1,10 @@
 FROM ubuntu:24.10
 
+ARG USERNAME=ubuntu
+ARG HOME=/home/${USERNAME}
+ARG USER_UID=1000
+ARG USER_GID=$USER_UID
+
 # Set locale before any packages are installed,
 # since packages are influenced by the current locale on installation
 #
@@ -15,7 +20,14 @@ RUN echo LC_CTYPE=\"en_US.UTF-8\" "\n" \
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl git fish \
-    vim sudo
+    vim sudo \
+    cmake `#for compiling llama-cpp, if we need to`
+
+# Install the cuda toolkit
+RUN curl -L https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb > ${HOME}/cuda-keyring_1.1-1_all.deb
+RUN dpkg -i ${HOME}/cuda-keyring_1.1-1_all.deb
+RUN apt-get update
+RUN apt-get -y install cuda-toolkit-12-8
 
 # Get Node
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash - 
@@ -23,12 +35,7 @@ RUN apt-get update && apt-get install -y nodejs
 
 # Preload yarn with corepack
 RUN corepack enable
-RUN corepack prepare yarn@4.4.0 --activate
-
-ARG USERNAME=ubuntu
-ARG HOME=/home/${USERNAME}
-ARG USER_UID=1000
-ARG USER_GID=$USER_UID
+RUN corepack prepare yarn@4.6.0 --activate
 
 # Create the user (disabled: user is default 'ubuntu')
 # RUN groupadd --gid $USER_GID $USERNAME \
