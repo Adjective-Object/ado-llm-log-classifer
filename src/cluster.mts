@@ -128,3 +128,31 @@ export class Cluster {
         };
     }
 }
+
+export type BestClusterMatch = {
+    similarities: Map<string, CombinedSimilarity>,
+    bestClusterName: string
+}
+
+export function matchBestCluster(
+    clusters: Map<string, Cluster>,
+    job: EmbeddedJobFailure,
+): BestClusterMatch | null {
+    // Find the best cluster for the given job.
+    let bestClusterName: string | null = null;
+    let similarities = new Map<string, CombinedSimilarity>();
+    for (const [clusterName, cluster] of clusters) {
+        const similarity = cluster.getSimilarity(job);
+        similarities.set(clusterName, similarity);
+        if (bestClusterName == null || similarity.combined > similarities.get(bestClusterName)!.combined) {
+            bestClusterName = clusterName;
+        }
+    }
+    if (bestClusterName == null) {
+        return null;
+    }
+    return {
+        similarities,
+        bestClusterName,
+    };
+}

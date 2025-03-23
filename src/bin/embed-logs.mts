@@ -206,7 +206,8 @@ async function main() {
     const issueEmbedder = new MemoizedEmbedder(embeddingContext);
 
     for (let [i, buildId] of buildIds.entries()) {
-        let prefix = `(${i}/${buildIds.length}) [suc:${skippedSuccessfulCt} prt:${skippedPartialCt} cached:${skippedAlreadyBuildCt}b/${skippedAlreadyJobCt}j new:${embeddedBuildCt}b/${embeddedJobCt}j]`
+        let percentStr = (Math.floor(i / buildIds.length * 1000) / 10).toFixed(1);
+        let prefix = `(${i}/${buildIds.length} ${percentStr.padStart(4, ' ')}%) [suc:${skippedSuccessfulCt} prt:${skippedPartialCt} cached:${skippedAlreadyBuildCt}b/${skippedAlreadyJobCt}j new:${embeddedBuildCt}b/${embeddedJobCt}j]`
         spinner.text = prefix + ": loading build..";
 
         let build = await logDir.loadBuild(buildId);

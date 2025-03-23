@@ -5,11 +5,5 @@
     "terminal.integrated.shellIntegration.enabled": false,
     "editor.formatOnSave": true,
     "files.autoSaveWorkspaceFilesOnly": true,
-    "search.useIgnoreFiles": false,
-    "search.exclude": {
-        "**/node_modules": true,
-        ".yarn": true,
-        "lib/**": true,
-        "yarn.lock": true,
-    }
+    "search.useIgnoreFiles": false
 }

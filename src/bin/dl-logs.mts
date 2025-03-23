@@ -1,7 +1,6 @@
 import ora from 'ora';
 import * as ado from 'azure-devops-node-api';
 import path from 'node:path';
-import fs from 'node:fs';
 import * as bi from 'azure-devops-node-api/interfaces/BuildInterfaces.js';
 import type { PagedList } from 'azure-devops-node-api/interfaces/common/VSSInterfaces.js';
 import type { IBuildApi } from 'azure-devops-node-api/BuildApi.js';
@@ -66,19 +65,6 @@ const argDescriptors: ArgDescriptors<Args> = {
     },
 }
 
-function printHelp() {
-    console.log("Usage: node src/index.js [options]");
-    console.log("Options:");
-    console.log("  -h, --help        Show help");
-    console.log("  -p, --patToken    Azure DevOps Personal Access Token");
-    console.log("  -n, --orgName     Azure DevOps Organization Name");
-    console.log("  -j, --projectName Azure DevOps Organization Name");
-    console.log("  -r, --repo        Repository Name");
-    console.log("  -br, --branch     Branch Name");
-    console.log("  -o, --out         Output Directory (default: ./out)");
-
-    return;
-}
 
 async function getBuildsPage(args: Args, buildAPI: IBuildApi, targetRepo: GitRepository, continuationToken: string | undefined): Promise<PagedList<bi.Build>> {
     return await buildAPI.getBuilds(
@@ -109,14 +95,6 @@ async function getBuildsPage(args: Args, buildAPI: IBuildApi, targetRepo: GitRep
         // See: https://learn.microsoft.com/en-us/dotnet/api/microsoft.teamfoundation.build.webapi.repositorytypes
         "tfsGit",                  // repositoryType: string
     )
-}
-
-function fileExists(filePath: string): Promise<boolean> {
-    return fs.promises.stat(filePath).then(x => x.isFile()).catch(() => false)
-}
-
-function getBuildDir(args: Args, buildId: number): string {
-    return path.join(args.outBaseDir, "logs", buildId.toString());
 }
 
 async function downloadLogContent(args: Args, buildAPI: IBuildApi, logDir: LogDir, buildId: number, logId: number): Promise<boolean> {

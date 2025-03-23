@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import { fileExists, dirExists, mkdirp } from "./fs-helpers.mjs";
 import { LlamaEmbedding } from "node-llama-cpp";
 import { FailedJob } from "timeline-helpers.mjs";
-import { ClusterDescriptor } from "./cluster.mjs";
+import { Cluster, ClusterDescriptor } from "./cluster.mjs";
 import { asyncMapWithLimit } from "./async-map.mjs";
 
 async function saveObject(
@@ -331,5 +331,36 @@ export class ClustersDir {
         return await fs.promises.readdir(clustersDir).then(dirs => dirs.map(
             dir => dir.replace(/^cluster-/, '').replace(/\.json$/, '')
         ));
+    }
+
+    //// Extension methods beyond the ORM
+    async loadAll(
+        embedDir: EmbedDir,
+    ): Promise<Map<string, Cluster>> {
+        let clusters = new Map<string, Cluster>();
+        let clusterNames = await this.listClusters();
+        await asyncMapWithLimit(clusterNames, async (clusterName) => {
+            let descriptor = await this.loadClusterDescriptor(clusterName);
+            if (descriptor == null) {
+                console.warn(`Could not load cluster descriptor for cluster ${clusterName}, is it malformed on disk?`);
+                return
+            }
+
+            let cluster = new Cluster(
+                descriptor.name,
+                await Promise.all(descriptor.referenceJobs.map(async (jobRef) => {
+                    let jobEmbedding = await embedDir.loadBuildJobEmbeddings(jobRef.buildId, jobRef.jobId);
+                    if (!jobEmbedding) {
+                        throw new Error(`Could not load job embedding for build:${jobRef.buildId}-job:${jobRef.jobId} referenced by cluster ${descriptor.name}. Did you forget to compute embeddings first?`);
+                    }
+                    return jobEmbedding;
+                }))
+            )
+
+            // load the cluster from disk
+            clusters.set(clusterName, cluster);
+        });
+
+        return clusters
     }
 }

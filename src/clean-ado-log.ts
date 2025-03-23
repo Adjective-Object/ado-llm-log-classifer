@@ -59,7 +59,9 @@ function filterOriLines(line: string): boolean {
         noOri.startsWith('finished caching sub-build ') ||
         // Cleaning up webpack progress messages
         noOri.startsWith('<s> [webpack.Progress] ') ||
-        noOri.startsWith('<i> [webpack.Progress] ')
+        noOri.startsWith('<i> [webpack.Progress] ') ||
+        // cleaning up tui updates
+        noOri.includes('nodeId=<nodeId ')
     )
 }
 
