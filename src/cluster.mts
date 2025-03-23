@@ -91,7 +91,9 @@ export class Cluster {
         return {
             issuesSimilarity,
             logSimilarity,
-            combined: (issuesSimilarity + logSimilarity) / 2,
+            // weigh the issues similarity more than the log similarity
+            // because the logs are more noisy
+            combined: (issuesSimilarity * 2 + logSimilarity) / 3,
         };
     }
 

@@ -18,7 +18,7 @@ import {
 } from './embedding.mjs';
 import color from 'cli-color';
 import { filesize } from 'filesize';
-import { cleanAdoLog } from './clean-ado-log.js';
+import { cleanAdoLogLine } from './clean-ado-log.js';
 
 type Args = {
     help?: string;
@@ -263,12 +263,11 @@ async function main() {
             let issueEmbeddings = await Promise.all(
                 job.issues.map((msg) => issueEmbedder.embed(msg))
             ).catch(catchOra(spinner));
-            let processedLog = await (job.logId ? logDir.loadLog(buildId, job.logId).then(
-                async (log) => {
-                    if (!log) {
+            let processedLog = await (job.logId ? logDir.loadLogLines(buildId, job.logId, cleanAdoLogLine).then(
+                async (cleanedLog) => {
+                    if (!cleanedLog) {
                         return undefined
                     }
-                    let cleanedLog = cleanAdoLog(log);
                     let chunks = tokenizeAndChunkText(cleanedLog, embeddingContext);
                     spinner.text = prefix + `: embedding build ${buildId} job:${job.id}/log:${job.logId} (${chunks.length} chunks, ${filesize(cleanedLog.length)})`;
                     return {

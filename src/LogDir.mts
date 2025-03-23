@@ -1,6 +1,7 @@
 import type { Build, Timeline } from "azure-devops-node-api/interfaces/BuildInterfaces.js";
 import type { EmbeddedJobFailure } from "./embedding.mjs";
 import path from "node:path";
+import readline from "node:readline";
 import * as fs from "node:fs";
 import { fileExists, dirExists, mkdirp } from "./fs-helpers.mjs";
 import { LlamaEmbedding } from "node-llama-cpp";
@@ -116,11 +117,39 @@ export class LogDir {
         // rename the file to remove the .part extension
         await fs.promises.rename(logPartPath, logPath);
     }
+    async loadLogLines(
+        buildId: number,
+        logId: number,
+        handleLine: (line: string) => string | null,
+    ): Promise<string | undefined> {
+        const logPath = this.getPathForBuildLog(buildId, logId);
+        if (!await fileExists(logPath)) {
+            return undefined;
+        }
+
+        const logFile = fs.createReadStream(logPath, { encoding: 'utf-8' });
+        const rl = readline.createInterface({
+            input: logFile,
+            // Note: we use the crlfDelay option to recognize all instances of CR LF
+            // ('\r\n') in input.txt as a single line break.
+            crlfDelay: Infinity
+        });
+        let lines: string[] = [];
+        for await (const line of rl) {
+            let processedLine = handleLine(line);
+            if (typeof processedLine == 'string') {
+                lines.push(processedLine);
+            }
+        }
+        rl.close();
+        logFile.destroy();
+        return lines.join('\n');
+    }
     async loadLog(
         buildId: number,
         logId: number,
     ): Promise<string | undefined> {
-        const logPath = path.join(this.getLogDirForBuild(buildId), this.logName(logId));
+        const logPath = this.getPathForBuildLog(buildId, logId);
         if (await fileExists(logPath)) {
             return await fs.promises.readFile(logPath, { encoding: 'utf-8' });
         }
@@ -130,7 +159,7 @@ export class LogDir {
         buildId: number,
         logId: number,
     ): Promise<boolean> {
-        const logPath = path.join(this.getLogDirForBuild(buildId), this.logName(logId));
+        const logPath = this.getPathForBuildLog(buildId, logId);
         return await fileExists(logPath);
     }
 }
@@ -171,14 +200,14 @@ export class EmbedDir {
     getEmbedDirForBuild(buildId: number) {
         return path.join(this.getBase(), buildId.toString());
     }
-    getEmbedFileForBuildJob(buildId: number, logId: number) {
-        return path.join(this.getEmbedDirForBuild(buildId), `embed-${logId}.json`);
+    getEmbedFileForBuildJob(buildId: number, jobId: number) {
+        return path.join(this.getEmbedDirForBuild(buildId), `embed-${jobId}.json`);
     }
-    getDebugLogForBuildJob(buildId: number, logId: number) {
+    getCleanLogForBuildJob(buildId: number, logId: number) {
         return path.join(this.getEmbedDirForBuild(buildId), `cleanlog-${logId}.txt`);
     }
-    getRawFileForBuildJob(buildId: number, logId: number) {
-        return path.join(this.getEmbedDirForBuild(buildId), `job-${logId}.json`);
+    getRawFileForBuildJob(buildId: number, jobId: number) {
+        return path.join(this.getEmbedDirForBuild(buildId), `job-${jobId}.json`);
     }
 
     async saveBuildJobEmbeddings(
@@ -197,13 +226,13 @@ export class EmbedDir {
         });
         if (cleanedLog) {
             await fs.promises.writeFile(
-                this.getDebugLogForBuildJob(buildId, embed.jobId),
+                this.getCleanLogForBuildJob(buildId, embed.jobId),
                 cleanedLog,
                 { encoding: 'utf-8' },
             );
         } else {
             await fs.promises.unlink(
-                this.getDebugLogForBuildJob(buildId, embed.jobId),
+                this.getCleanLogForBuildJob(buildId, embed.jobId),
             ).catch(() => {
                 // ignore if the file does not exist
             });
@@ -217,6 +246,19 @@ export class EmbedDir {
     }
     listAllBuildJobEmbeddings() {
         return listAllBuildJobEmbeddings(this);
+    }
+    async getTotalJobEmbeddingCount(): Promise<number> {
+        const baseDir = this.getBase();
+        if (!await dirExists(baseDir)) {
+            return 0;
+        }
+        const buildDirs = await fs.promises.readdir(baseDir);
+        let count = 0;
+        for (let buildDir of buildDirs) {
+            const jobEmbedFiles = await fs.promises.readdir(path.join(baseDir, buildDir));
+            count += jobEmbedFiles.filter(file => file.startsWith('embed-') && file.endsWith('.json')).length;
+        }
+        return count;
     }
 
     async loadBuildJobEmbeddings(

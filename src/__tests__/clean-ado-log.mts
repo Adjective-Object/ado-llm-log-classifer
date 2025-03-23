@@ -1,4 +1,4 @@
-import { cleanAdoLog } from "../clean-ado-log.js";
+import { cleanAdoLogLine } from "../clean-ado-log.js";
 
 describe('clean-ado-log', () => {
     it('cleans ugly ori logs', () => {
@@ -23,8 +23,21 @@ describe('clean-ado-log', () => {
 2024-11-19T18:56:05.7381086Z [2m[4.4924s] throttler(source-watcher):processing CREATE:/mnt/vss/_work/1/s/packages/accelerator/accelerator-diverse-reactions/src/AddReactionButton.locstring.d.json.ts @ 1732042565[22m
 2024-11-19T18:56:05.7382013Z [2m[4.4924s] throttler(source-watcher):emitted CREATE:/mnt/vss/_work/1/s/packages/accelerator/accelerator-diverse-reactions/src/AddReactionButton.locstring.d.json.ts @ 1732042565[22m
 2024-11-19T18:56:05.7382778Z [2m[4.4924s] throttler:cleaning up CREATE on /mnt/vss/_work/1/s/packages/accelerator/accelerator-common/src/AccPivot.locstring.d.json.ts[22m
+<s> [webpack.Progress] 92% sealing asset processing SourceMapDevToolPlugin owa.81617.js generate SourceMap
+<s> [webpack.Progress] 92% sealing asset processing SourceMapDevToolPlugin owa.81617.js generated SourceMap
+<s> [webpack.Progress] 92% sealing asset processing SourceMapDevToolPlugin owa.43720.js generate SourceMap
+<s> [webpack.Progress] 92% sealing asset processing SourceMapDevToolPlugin owa.43720.js generated SourceMap
+<i> [webpack.Progress]  |  |  | 159 ms SourceMapDevToolPlugin > owa.43720.js
+<s> [webpack.Progress] 92% sealing asset processing SourceMapDevToolPlugin owa.23188.css generate SourceMap
+<s> [webpack.Progress] 92% sealing asset processing SourceMapDevToolPlugin owa.23188.css generated SourceMap
+<s> [webpack.Progress] 92% sealing asset processing SourceMapDevToolPlugin owa.23188.js generate SourceMap
+<s> [webpack.Progress] 92% sealing asset processing SourceMapDevToolPlugin owa.23188.js generated SourceMap
+<i> [webpack.Progress]  |  |  | 71 ms SourceMapDevToolPlugin > owa.23188.js
+<s> [webpack.Progress] 92% sealing asset processing SourceMapDevToolPlugin owa.87951.css generate SourceMap
+<s> [webpack.Progress] 92% sealing asset processing SourceMapDevToolPlugin owa.87951.css generated SourceMap
+<s> [webpack.Progress] 92% sealing asset processing SourceMapDevToolPlugin owa.87951.js generate SourceMap
 `
-        let cleaned = cleanAdoLog(log)
+        let cleaned = log.split('\n').map(cleanAdoLogLine).filter(line => typeof line === 'string').join('\n');
         expect(cleaned).toEqual('');
     });
 });

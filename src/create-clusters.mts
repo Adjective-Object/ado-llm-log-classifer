@@ -143,7 +143,13 @@ async function main() {
     console.log();
 
     // go through all the embeddings in the embed dir
+    let jobTotal = await embedDir.getTotalJobEmbeddingCount();
+    let jobCt = 0;
+    let bestIncorrectGuess = 0;
+    let worstCorrectGuess = 0;
+
     for await (let jobRef of embedDir.listAllBuildJobEmbeddings()) {
+        jobCt++;
         // If this is one of the reference jobs, skip it
         if (Array.from(clusters.values()).some(
             cluster => cluster.referenceJobs.some(
@@ -168,17 +174,20 @@ async function main() {
                 bestCluster = clusterName;
             }
         }
-        spinner.succeed(`=== Job ${jobRef.buildId}-${jobRef.jobId} ===`);
+        spinner.succeed(`=== [${jobCt}/${jobTotal}] Job ${jobRef.buildId}-${jobRef.jobId} ===`);
         let addClusterName: string | null = null;
 
         // Print the similarities to existing clusters
         let sortedClusterSimilarities = Array.from(clusterSimilarities.entries()).sort((a, b) => b[1].combined - a[1].combined);
         if (clusterSimilarities.size > 0) {
             console.log(`\n  ${color.bold("Similarities")}:`);
+            let maxClusterLen = Math.max(...sortedClusterSimilarities.map(([clusterName]) => clusterName.length));
+
             for (let [clusterName, similarity] of sortedClusterSimilarities) {
                 const isBestCluster = clusterName == bestCluster && similarity.combined >= minCombinedCosineSim;
-                console.log(`    ${isBestCluster ? color.cyan(clusterName) : color.blue(clusterName)}: ${cformatSim(similarity.combined)
-                    }  issues: ${cformatSim(similarity.issuesSimilarity)} logs: ${cformatSim(similarity.logSimilarity)} `);
+                console.log(`    ${isBestCluster ? color.cyan(clusterName) : color.blue(clusterName)}:${' '.repeat(maxClusterLen - clusterName.length)
+                    }\tcombo: ${cformatSim(similarity.combined)
+                    }\tissues: ${cformatSim(similarity.issuesSimilarity)}\tlogs: ${cformatSim(similarity.logSimilarity)} `);
             }
         }
 
@@ -189,6 +198,10 @@ async function main() {
         }
         const logPath = (jobRaw?.logId) ? logDir.getPathForBuildLog(jobRef.buildId, jobRaw.logId) : "<none>";
         console.log(`\n  ${color.bold("Log")}: ${logPath}`);
+        if (jobRaw?.logId) {
+            let logCleanPath = embedDir.getCleanLogForBuildJob(jobRef.buildId, jobRef.jobId);
+            console.log(`  ${color.bold("Log (cleaned)")}: ${logCleanPath}`);
+        }
 
         // clear a line
         console.log()
@@ -212,7 +225,7 @@ async function main() {
                     : choices;
 
             if (bestSimilarity.combined < minCombinedCosineSim) {
-                console.log(color.yellow(`This is less than the minimum required similarity ${cformatSim(minCombinedCosineSim)}`));
+                console.log(color.yellow(`This is less than the minimum required similarity ${cformatSim(bestSimilarity.combined)} < ${cformatSim(minCombinedCosineSim)}`));
                 console.log("Choose a cluster to add this job to, or create a new one:")
                 do {
                     const promptResult = await prompts(
@@ -236,9 +249,9 @@ async function main() {
                         console.log("No cluster selected, exiting");
                         return;
                     } else {
-                        addClusterName = promptResult.cluster;
+                        addClusterName = promptResult.cluster.trim();
                     }
-                } while (!addClusterName);
+                } while (!addClusterName || addClusterName.length === 0);
             }
         }
 
