@@ -2,6 +2,7 @@ import { LlamaEmbedding, type LlamaEmbeddingContext, type Token } from "node-lla
 import { tokenizeText } from "node-llama-cpp"
 
 export type EmbeddedJobFailure = {
+    buildId: number
     jobId: number
     issues: LlamaEmbedding[]
     log?: LlamaEmbedding

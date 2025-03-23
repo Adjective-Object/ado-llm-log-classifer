@@ -18,6 +18,7 @@ import {
 } from './embedding.mjs';
 import color from 'cli-color';
 import { filesize } from 'filesize';
+import { cleanAdoLog } from './clean-ado-log.js';
 
 type Args = {
     help?: string;
@@ -262,28 +263,35 @@ async function main() {
             let issueEmbeddings = await Promise.all(
                 job.issues.map((msg) => issueEmbedder.embed(msg))
             ).catch(catchOra(spinner));
-            let logEmbedding = await (job.logId ? logDir.loadLog(buildId, job.logId).then(
-                (log) => {
+            let processedLog = await (job.logId ? logDir.loadLog(buildId, job.logId).then(
+                async (log) => {
                     if (!log) {
-                        return null;
+                        return undefined
                     }
-                    let chunks = tokenizeAndChunkText(log, embeddingContext);
-                    spinner.text = prefix + `: embedding build ${buildId} job:${job.id}/log:${job.logId} (${chunks.length} chunks, ${filesize(log.length)})`;
-                    return embedChunkedTokens(chunks, embeddingContext);
+                    let cleanedLog = cleanAdoLog(log);
+                    let chunks = tokenizeAndChunkText(cleanedLog, embeddingContext);
+                    spinner.text = prefix + `: embedding build ${buildId} job:${job.id}/log:${job.logId} (${chunks.length} chunks, ${filesize(cleanedLog.length)})`;
+                    return {
+                        embedding: await embedChunkedTokens(chunks, embeddingContext),
+                        cleanedLog
+                    }
                 }
             ) : null)?.catch(catchOra(spinner));
+            let logEmbedding = processedLog?.embedding;
+            let cleanedLog = processedLog?.cleanedLog;
 
             spinner.text = prefix + `: embedding build ${buildId} job:${job.id}/log:${job.logId} -- saving`;
 
             // save the embeddings
             let toSave: EmbeddedJobFailure = {
+                buildId: buildId,
                 jobId: job.id,
                 issues: issueEmbeddings,
             };
             if (logEmbedding) {
                 toSave.log = logEmbedding;
             }
-            await embedDir.saveBuildJobEmbeddings(buildId, toSave).catch(catchOra(spinner));
+            await embedDir.saveBuildJobEmbeddings(buildId, toSave, cleanedLog).catch(catchOra(spinner));
             embeddedJobCt++;
         }
         if (anyEmbed) {

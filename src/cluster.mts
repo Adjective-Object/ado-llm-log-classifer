@@ -39,6 +39,14 @@ export class Cluster {
         public referenceJobs: EmbeddedJobFailure[],
     ) { }
 
+    addReferenceJob(
+        job: EmbeddedJobFailure,
+    ) {
+        // Add a reference job to this cluster. This is used when
+        // a new job is added to the cluster and we want to
+        // add it to the list of reference jobs.
+        this.referenceJobs.push(job);
+    }
 
     getIssuesSimilarity(
         job: EmbeddedJobFailure,
@@ -61,6 +69,14 @@ export class Cluster {
         // reference jobs that define this cluster and the passed-in job.
         let maxSim = 0.0;
         for (const refJob of this.referenceJobs) {
+            if (job.log == null && refJob.log == null) {
+                // if neither entry has logs, we consider them 100% similar
+                return 1;
+            } else if ((job.log == null) != (refJob.log == null)) {
+                // logs are optional, so if one is null and the other is not,
+                // we don't want to consider them similar
+                continue;
+            }
             maxSim = Math.max(maxSim, job.log!.calculateCosineSimilarity(refJob.log!));
         }
 
@@ -96,5 +112,17 @@ export class Cluster {
             return 0;
         }
         return sum / count;
+    }
+
+    getDescriptor(): ClusterDescriptor {
+        // Returns a descriptor of this cluster that can be used to
+        // recreate it later.
+        return {
+            name: this.name,
+            referenceJobs: this.referenceJobs.map((job) => ({
+                buildId: job.buildId,
+                jobId: job.jobId,
+            })),
+        };
     }
 }

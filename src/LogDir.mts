@@ -174,6 +174,9 @@ export class EmbedDir {
     getEmbedFileForBuildJob(buildId: number, logId: number) {
         return path.join(this.getEmbedDirForBuild(buildId), `embed-${logId}.json`);
     }
+    getDebugLogForBuildJob(buildId: number, logId: number) {
+        return path.join(this.getEmbedDirForBuild(buildId), `cleanlog-${logId}.txt`);
+    }
     getRawFileForBuildJob(buildId: number, logId: number) {
         return path.join(this.getEmbedDirForBuild(buildId), `job-${logId}.json`);
     }
@@ -181,6 +184,9 @@ export class EmbedDir {
     async saveBuildJobEmbeddings(
         buildId: number,
         embed: EmbeddedJobFailure,
+        // optional string for the cleaned log to save alongside
+        // the embeddings. This is just for debugging.
+        cleanedLog?: string,
     ) {
         const toSimple = (embedding: LlamaEmbedding) => ({
             vector: Array.from(embedding.vector),
@@ -189,6 +195,19 @@ export class EmbedDir {
             issues: embed.issues.map(toSimple),
             log: embed.log ? toSimple(embed.log) : undefined,
         });
+        if (cleanedLog) {
+            await fs.promises.writeFile(
+                this.getDebugLogForBuildJob(buildId, embed.jobId),
+                cleanedLog,
+                { encoding: 'utf-8' },
+            );
+        } else {
+            await fs.promises.unlink(
+                this.getDebugLogForBuildJob(buildId, embed.jobId),
+            ).catch(() => {
+                // ignore if the file does not exist
+            });
+        }
     }
     async hasBuildJobEmbeddings(
         buildId: number,
@@ -214,6 +233,7 @@ export class EmbedDir {
             vector: issue.vector,
         }))
         return {
+            buildId,
             jobId,
             issues,
             log: raw.log ? new LlamaEmbedding({
@@ -242,18 +262,22 @@ export class ClustersDir {
         return path.join(this.outDir, 'clusters');
     }
 
-    getDirForCluster(clusterName: string) {
-        return path.join(this.getBase(), 'cluster-' + clusterName);
-    }
     getPathForClusterDescriptor(clusterName: string) {
-        return path.join(this.getDirForCluster(clusterName), 'cluster.json');
+        return path.join(this.getBase(), `cluster-${clusterName}.json`);
     }
 
-    async saveClusterDescriptor(clusterName: string, cluster: ClusterDescriptor) {
-        await saveObject(this.getDirForCluster(clusterName), cluster);
+    async saveClusterDescriptor(cluster: ClusterDescriptor) {
+        await saveObject(this.getPathForClusterDescriptor(cluster.name), cluster);
     }
     async loadClusterDescriptor(clusterName: string): Promise<ClusterDescriptor | undefined> {
-        return await loadObject(this.getDirForCluster(clusterName));
+        let clusterDescriptor = await loadObject(this.getPathForClusterDescriptor(clusterName));
+        if (!clusterDescriptor) {
+            return clusterDescriptor;
+        }
+        if (clusterDescriptor.name !== clusterName) {
+            throw new Error(`Cluster name mismatch: ${clusterDescriptor.name} !== ${clusterName}`);
+        }
+        return clusterDescriptor;
     }
     async listClusters(): Promise<string[]> {
         const clustersDir = this.getBase();
@@ -261,7 +285,7 @@ export class ClustersDir {
             return [];
         }
         return await fs.promises.readdir(clustersDir).then(dirs => dirs.map(
-            dir => dir.replace(/^cluster-/, '')
+            dir => dir.replace(/^cluster-/, '').replace(/\.json$/, '')
         ));
     }
 }

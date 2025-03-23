@@ -162,7 +162,11 @@ function getParentFailingIssueMessages(
         if (head.issues) {
             for (let issue of head.issues) {
                 if (issue.type == IssueType.Error && issue.message) {
-                    issueMessages.push(issue.message);
+                    if (head.name) {
+                        issueMessages.push(head.name + "::" + issue.message);
+                    } else {
+                        issueMessages.push(issue.message);
+                    }
                 }
             }
         }
