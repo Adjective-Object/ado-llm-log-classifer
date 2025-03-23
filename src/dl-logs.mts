@@ -7,11 +7,13 @@ import type { PagedList } from 'azure-devops-node-api/interfaces/common/VSSInter
 import type { IBuildApi } from 'azure-devops-node-api/BuildApi.js';
 import type { IRequestOptions, IRestResponse } from 'typed-rest-client';
 import type { GitRepository } from 'azure-devops-node-api/interfaces/GitInterfaces.js';
-import { LogDir } from './LogDir.mjs';
+import { ClustersDir, LogDir } from './LogDir.mjs';
 import { getLeafFailedLogIds } from './timeline-helpers.mjs';
 import { catchOra } from './ora-helpers.mjs';
 import { parseArgs, type ArgDescriptors } from './args.mjs';
 import { withOra } from './ora-helpers.mjs';
+import { asyncMapWithLimit } from './async-map.mjs';
+import { Console } from 'node:console';
 
 type Args = {
     help?: string;
@@ -167,7 +169,6 @@ async function main() {
     buildAPI.rest.get = async function <T>(resource: string, options?: IRequestOptions | undefined): Promise<IRestResponse<T>> {
         let restResponse = await oldget.apply(this, [resource, options]) as IRestResponse<T>
         lastContinuationToken = (restResponse.headers as any)["x-ms-continuationtoken"];
-        (restResponse.result as any).continuationToken = continuationToken;
         return restResponse;
     };
 
@@ -180,10 +181,41 @@ async function main() {
         return;
     }
 
-    // start bulk downloading the logs
-    console.log("Starting bulk download of logs...");
 
     let logDir = new LogDir(args.outBaseDir);
+
+    // check if we have clusters defined
+    let clusterDir = new ClustersDir(args.outBaseDir);
+    let referenceJobs = new Set((await asyncMapWithLimit(await clusterDir.listClusters(), async (clusterName) => {
+        let cluster = await clusterDir.loadClusterDescriptor(clusterName);
+        return cluster?.referenceJobs.map((job) => job.buildId);
+    })).flat().filter((x) => typeof x === 'number'))
+    // ensure all the reference jobs are downloaded before we start downloading logs
+    if (referenceJobs.size > 0) {
+        console.log("Fetching builds/jobs referenced by clusters...");
+        let spinner = ora({
+            text: "fetching reference jobs..",
+        }).start();
+        let jobsArr = Array.from(referenceJobs);
+        await asyncMapWithLimit(jobsArr, async (buildId) => {
+            let build = await logDir.loadBuild(buildId);
+            if (build == null) {
+                build = await buildAPI.getBuild(args.projectName, buildId);
+            }
+            let [timeline, _] = await getTimeline(args, logDir, buildAPI, buildId);
+            let leafFailedLogIds = await getLeafFailedLogIds(timeline);
+            for (let logId of leafFailedLogIds) {
+                await downloadLogContent(args, buildAPI, logDir, buildId, logId);
+            }
+            spinner.succeed(`build ${buildId} fetched`)
+            spinner = ora({
+                text: "fetching reference jobs.."
+            })
+        }, 2).catch(catchOra(spinner));
+    }
+
+    // start bulk downloading the logs
+    console.log("Starting bulk download of logs...");
 
     let continuationToken: string | undefined = args.continuationToken;
     let page = 0;
