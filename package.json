@@ -12,9 +12,9 @@
     "create-clusters": "yarn build && node --experimental-vm-modules $(yarn bin create-clusters)"
   },
   "bin": {
-    "create-clusters": "./lib/create-clusters.mjs",
-    "dl-logs": "./lib/dl-logs.mjs",
-    "embed-logs": "./lib/embed-logs.mjs"
+    "create-clusters": "./lib/bin/create-clusters.mjs",
+    "dl-logs": "./lib/bin/dl-logs.mjs",
+    "embed-logs": "./lib/bin/embed-logs.mjs"
   },
   "type": "module",
   "devDependencies": {

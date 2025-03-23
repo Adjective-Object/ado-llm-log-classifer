@@ -3,22 +3,22 @@ import * as stream from "node:stream"
 import * as path from 'node:path';
 import * as hub from "@huggingface/hub";
 import { BuildResult } from 'azure-devops-node-api/interfaces/BuildInterfaces.js';
-import { parseArgs, type ArgDescriptors } from './args.mjs';
+import { parseArgs, type ArgDescriptors } from '../args.mjs';
 import ora from 'ora';
-import { fileExists, mkdirp } from './fs-helpers.mjs';
+import { fileExists, mkdirp } from '../fs-helpers.mjs';
 import { getLlama, LlamaGpuType } from "node-llama-cpp";
-import { EmbedDir, LogDir } from './LogDir.mjs';
-import { getLeafFailedJobs } from './timeline-helpers.mjs';
-import { catchOra, withOra } from './ora-helpers.mjs';
+import { EmbedDir, LogDir } from '../LogDir.mjs';
+import { getLeafFailedJobs } from '../timeline-helpers.mjs';
+import { catchOra, withOra } from '../ora-helpers.mjs';
 import {
     embedChunkedTokens,
     MemoizedEmbedder,
     tokenizeAndChunkText,
     type EmbeddedJobFailure
-} from './embedding.mjs';
+} from '../embedding.mjs';
 import color from 'cli-color';
 import { filesize } from 'filesize';
-import { cleanAdoLogLine } from './clean-ado-log.js';
+import { cleanAdoLogLine } from '../clean-ado-log.js';
 
 type Args = {
     help?: string;

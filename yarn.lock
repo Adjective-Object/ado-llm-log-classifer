@@ -1782,9 +1782,9 @@ __metadata:
     typed-rest-client: "npm:^2.1.0"
     typescript: "npm:^5.8.2"
   bin:
-    create-clusters: ./lib/create-clusters.mjs
-    dl-logs: ./lib/dl-logs.mjs
-    embed-logs: ./lib/embed-logs.mjs
+    create-clusters: ./lib/bin/create-clusters.mjs
+    dl-logs: ./lib/bin/dl-logs.mjs
+    embed-logs: ./lib/bin/embed-logs.mjs
   languageName: unknown
   linkType: soft
 

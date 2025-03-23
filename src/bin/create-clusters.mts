@@ -1,10 +1,10 @@
 import * as path from 'node:path';
-import { parseArgs, type ArgDescriptors } from './args.mjs';
-import { ClustersDir as ClusterDir, EmbedDir, LogDir } from './LogDir.mjs';
+import { parseArgs, type ArgDescriptors } from '../args.mjs';
+import { ClustersDir as ClusterDir, EmbedDir, LogDir } from '../LogDir.mjs';
 import input from "@inquirer/input";
 import prompts from 'prompts'
 
-import { Cluster, ClusterDescriptor, CombinedSimilarity } from './cluster.mjs';
+import { Cluster, ClusterDescriptor, CombinedSimilarity } from '../cluster.mjs';
 import ora from 'ora';
 import color from 'cli-color';
 

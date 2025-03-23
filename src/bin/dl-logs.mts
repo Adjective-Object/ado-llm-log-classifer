@@ -7,13 +7,12 @@ import type { PagedList } from 'azure-devops-node-api/interfaces/common/VSSInter
 import type { IBuildApi } from 'azure-devops-node-api/BuildApi.js';
 import type { IRequestOptions, IRestResponse } from 'typed-rest-client';
 import type { GitRepository } from 'azure-devops-node-api/interfaces/GitInterfaces.js';
-import { ClustersDir, LogDir } from './LogDir.mjs';
-import { getLeafFailedLogIds } from './timeline-helpers.mjs';
-import { catchOra } from './ora-helpers.mjs';
-import { parseArgs, type ArgDescriptors } from './args.mjs';
-import { withOra } from './ora-helpers.mjs';
-import { asyncMapWithLimit } from './async-map.mjs';
-import { Console } from 'node:console';
+import { ClustersDir, LogDir } from '../LogDir.mjs';
+import { getLeafFailedLogIds } from '../timeline-helpers.mjs';
+import { catchOra } from '../ora-helpers.mjs';
+import { parseArgs, type ArgDescriptors } from '../args.mjs';
+import { withOra } from '../ora-helpers.mjs';
+import { asyncMapWithLimit } from 'async-map.mjs';
 
 type Args = {
     help?: string;
@@ -212,7 +211,7 @@ async function main() {
             for (let logId of leafFailedLogIds) {
                 lDownloaded = await downloadLogContent(args, buildAPI, logDir, buildId, logId) || lDownloaded;
             }
-            spinner.succeed(`reference build ${buildId} ready (build:${!bDownloaded ? "cached" : "fetched"} timeline:${!tDownloaded ? "cached" : "fetched"} log:${!lDownloaded ?  "cached" : "fetched"})`);
+            spinner.succeed(`reference build ${buildId} ready (build:${!bDownloaded ? "cached" : "fetched"} timeline:${!tDownloaded ? "cached" : "fetched"} log:${!lDownloaded ? "cached" : "fetched"})`);
             spinner = ora({
                 text: "fetching reference jobs.."
             })
