@@ -82,5 +82,5 @@ export function cleanAdoLogLine(
     line = line.replaceAll(timestampRegex, '<timestamp>');
     line = line.replaceAll(percentRegex, '00%');
 
-    return filterOriLines(line) ? line : null;
+    return line.length > 0 && filterOriLines(line) ? line : null;
 }

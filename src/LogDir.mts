@@ -55,7 +55,12 @@ export class LogDir {
         await saveObject(path.join(this.getLogDirForBuild(buildId), "build.json"), build)
     }
     async loadBuild(buildId: number): Promise<Build | undefined> {
-        return await loadObject(path.join(this.getLogDirForBuild(buildId), "build.json"))
+        let rawBuild: { [key in keyof Build]: any } = await loadObject(path.join(this.getLogDirForBuild(buildId), "build.json"))
+        if (!rawBuild) {
+            return undefined;
+        }
+        rawBuild.startTime = rawBuild.startTime ? new Date(rawBuild.startTime) : rawBuild.startTime;
+        return rawBuild as Build
     }
     /// Returns a list of build IDs
     async listBuilds(): Promise<number[]> {
@@ -339,9 +344,7 @@ export class ClustersDir {
     ): Promise<Map<string, Cluster>> {
         let clusters = new Map<string, Cluster>();
         let clusterNames = await this.listClusters();
-        console.log('x');
         await asyncMapWithLimit(clusterNames, async (clusterName) => {
-            console.log('a');
             let descriptor = await this.loadClusterDescriptor(clusterName);
             if (descriptor == null) {
                 console.warn(`Could not load cluster descriptor for cluster ${clusterName}, is it malformed on disk?`);

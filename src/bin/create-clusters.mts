@@ -42,7 +42,6 @@ async function main() {
     if (args == null) {
         return;
     }
-    console.log('a');
 
     let minCombinedCosineSim = parseFloat(args.minCombinedCosineSim);
     if (isNaN(minCombinedCosineSim)) {
@@ -51,7 +50,6 @@ async function main() {
     }
     // create a colorizer based on the minimum combined cosine similarity
     let cformatSim = cutoffColorize(minCombinedCosineSim);
-    console.log('a');
 
     let embedDir = new EmbedDir(args.outBaseDir);
     let logDir = new LogDir(args.outBaseDir);
@@ -70,7 +68,6 @@ async function main() {
         }
     }
     console.log();
-    console.log('a');
 
     // Cluster all the embeddings
     let jobTotal = await embedDir.getTotalJobEmbeddingCount();
@@ -109,9 +106,10 @@ async function main() {
             if (bestSimilarity == null) {
                 throw new Error(`Internal error: cluster ${bestMatch.bestClusterName} not found in cluster similarities?`);
             } else if (bestSimilarity.combined < minCombinedCosineSim) {
-                console.log(color.yellow(`Best match to existing cluster is a bad match: ${cformatSim(bestSimilarity.combined)} < ${cformatSim(minCombinedCosineSim)}`));
+                console.log(color.yellow(`Best match ${color.blue(bestMatch.bestClusterName)} not similar enough: ${cformatSim(bestSimilarity.combined)} < ${cformatSim(minCombinedCosineSim)} (threshold)`));
             } else {
-                // best similarity is good enough, just add the job to the cluster
+                // best similarity is good enough, skip this job
+                continue;
             }
         }
 
