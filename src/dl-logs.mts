@@ -197,21 +197,26 @@ async function main() {
             text: "fetching reference jobs..",
         }).start();
         let jobsArr = Array.from(referenceJobs);
-        await asyncMapWithLimit(jobsArr, async (buildId) => {
+        for (let buildId of jobsArr) {
             let build = await logDir.loadBuild(buildId);
+            let bDownloaded = false
             if (build == null) {
+                bDownloaded = true
                 build = await buildAPI.getBuild(args.projectName, buildId);
+                // save the build to a file, locally
+                await logDir.saveBuild(buildId, build);
             }
-            let [timeline, _] = await getTimeline(args, logDir, buildAPI, buildId);
+            let [timeline, tDownloaded] = await getTimeline(args, logDir, buildAPI, buildId);
             let leafFailedLogIds = await getLeafFailedLogIds(timeline);
+            let lDownloaded = false;
             for (let logId of leafFailedLogIds) {
-                await downloadLogContent(args, buildAPI, logDir, buildId, logId);
+                lDownloaded = await downloadLogContent(args, buildAPI, logDir, buildId, logId) || lDownloaded;
             }
-            spinner.succeed(`build ${buildId} fetched`)
+            spinner.succeed(`build ${buildId} fetched (build:${!bDownloaded ? "cached" : "fetched"} timeline:${!tDownloaded ? "cached" : "fetched"} log:${!lDownloaded ?  "cached" : "fetched"})`);
             spinner = ora({
                 text: "fetching reference jobs.."
             })
-        }, 2).catch(catchOra(spinner));
+        }
     }
 
     // start bulk downloading the logs

@@ -81,12 +81,14 @@ export class LogDir {
         return results.filter((result) => result !== null) as number[];
     }
 
-    async saveTimeline(buildId: number, timeline: unknown) {
-        const timelinePath = path.join(this.getLogDirForBuild(buildId), 'timeline.json');
-        await saveObject(timelinePath, timeline);
+    getTimelinePathForBuild(buildId: number) {
+        return path.join(this.getLogDirForBuild(buildId), 'timeline.json');
+    }
+    async saveTimeline(buildId: number, timeline: Timeline) {
+        await saveObject(this.getTimelinePathForBuild(buildId), timeline);
     }
     async loadTimeline(buildId: number): Promise<Timeline | undefined> {
-        return await loadObject(path.join(this.getLogDirForBuild(buildId), 'timeline.json'));
+        return await loadObject(this.getTimelinePathForBuild(buildId));
     }
 
     async saveLog(
