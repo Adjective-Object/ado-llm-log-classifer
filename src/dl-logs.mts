@@ -212,7 +212,7 @@ async function main() {
             for (let logId of leafFailedLogIds) {
                 lDownloaded = await downloadLogContent(args, buildAPI, logDir, buildId, logId) || lDownloaded;
             }
-            spinner.succeed(`build ${buildId} fetched (build:${!bDownloaded ? "cached" : "fetched"} timeline:${!tDownloaded ? "cached" : "fetched"} log:${!lDownloaded ?  "cached" : "fetched"})`);
+            spinner.succeed(`reference build ${buildId} ready (build:${!bDownloaded ? "cached" : "fetched"} timeline:${!tDownloaded ? "cached" : "fetched"} log:${!lDownloaded ?  "cached" : "fetched"})`);
             spinner = ora({
                 text: "fetching reference jobs.."
             })
