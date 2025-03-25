@@ -21,8 +21,12 @@ Generate access tokens at:
 yarn test
 
 # builds, then downloads logs
-yarn tsc && node ./lib/dl-logs.mjs
+yarn dl-logs
 # builds, then classifies downloaded logs
-yarn tsc && node ./lib/classify-logs.mjs
+yarn embed-logs
+# builds, then runs an interactive tool for creating clusters
+yarn create-clusters
+# processes the downloaded logs against the cluster definitions
+yarn make-csv
 
 ```
