@@ -146,7 +146,7 @@ export function getLeafFailedLogIds(
 }
 
 export type FailedJob = {
-    id: number
+    index: number
     issues: string[];
     logId?: number;
 }
@@ -187,7 +187,7 @@ export function getLeafFailedJobs(
         let record = records[i];
         let logId = record.log?.id;
         return {
-            id: i,
+            index: i,
             issues: getParentFailingIssueMessages(timeline, i),
             logId: logId,
         };

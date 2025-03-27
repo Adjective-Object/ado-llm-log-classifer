@@ -11,7 +11,7 @@ import { getLeafFailedLogIds } from '../timeline-helpers.mjs';
 import { catchOra } from '../ora-helpers.mjs';
 import { parseArgs, type ArgDescriptors } from '../args.mjs';
 import { withOra } from '../ora-helpers.mjs';
-import { asyncMapWithLimit } from 'async-map.mjs';
+import { asyncMapWithLimit } from '../async-map.mjs';
 
 type Args = {
     help?: string;

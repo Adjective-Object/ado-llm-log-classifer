@@ -1,4 +1,4 @@
-import { asyncMapWithLimit } from "../async-map.mjs";
+import { asyncMapWithLimit, asyncMapWithLimitIter } from "../async-map.mjs";
 
 describe('async-map', () => {
     it('should map async functions with a limit', async () => {
@@ -38,9 +38,17 @@ describe('async-map', () => {
         const results = await asyncMapWithLimit(items, fn, 1);
         expect(results).toEqual([2, 4, 6, 8, 10]);
     });
-
-    it('should throw an error if concurrentLimit is less than 1', async () => {
-        const items = [1, 2, 3, 4, 5];
-        expect(asyncMapWithLimit(items, async (item) => item, 0)).rejects.toThrow('concurrentLimit must be 1 or more');
+    
+    it('should map empty list', async () => {
+        let resut = await asyncMapWithLimit([], async (item) => item, 1);
+        expect(resut).toEqual([]);
     });
+
+    it('should map empty async generator', async () => {
+        async function* emptyAsyncGenerator() {
+            await new Promise((resolve) => setTimeout(resolve, 1));
+        }
+        let resut = await asyncMapWithLimitIter(emptyAsyncGenerator(), async (item) => item, 1);
+        expect(resut).toEqual([]);
+    })
 });

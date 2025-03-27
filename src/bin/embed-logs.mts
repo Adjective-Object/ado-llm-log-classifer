@@ -242,14 +242,14 @@ async function main() {
         let anyEmbed = false
         for (let job of failedJobs) {
             // check if the job has already been embedded
-            if (await embedDir.hasBuildJobEmbeddings(buildId, job.id)) {
+            if (await embedDir.hasBuildJobEmbeddings(buildId, job.index)) {
                 skippedAlreadyJobCt++;
                 continue;
             }
             anyEmbed = true;
 
             // save the inputs to a logfile
-            spinner.text = prefix + `: build ${buildId} job:${job.id}/log:${job.logId} - saving raw inputs`;
+            spinner.text = prefix + `: build ${buildId} job:${job.index}/log:${job.logId} - saving raw inputs`;
             // hack: add the log path to the job object for debugging
             let extJob = {
                 ...job,
@@ -260,7 +260,7 @@ async function main() {
             }
             embedDir.saveBuildJobRaw(buildId, extJob).catch(catchOra(spinner));
 
-            spinner.text = prefix + `: build ${buildId} job:${job.id}/log:${job.logId} - ${job.issues.length} issues`;
+            spinner.text = prefix + `: build ${buildId} job:${job.index}/log:${job.logId} - ${job.issues.length} issues`;
             let issueEmbeddings = await Promise.all(
                 job.issues.map((msg) => issueEmbedder.embed(msg))
             ).catch(catchOra(spinner));
@@ -270,7 +270,7 @@ async function main() {
                         return undefined
                     }
                     let chunks = tokenizeAndChunkText(cleanedLog, embeddingContext);
-                    spinner.text = prefix + `: embedding build ${buildId} job:${job.id}/log:${job.logId} (${chunks.length} chunks, ${filesize(cleanedLog.length)})`;
+                    spinner.text = prefix + `: embedding build ${buildId} job:${job.index}/log:${job.logId} (${chunks.length} chunks, ${filesize(cleanedLog.length)})`;
                     return {
                         embedding: await embedChunkedTokens(chunks, embeddingContext),
                         cleanedLog
@@ -280,12 +280,12 @@ async function main() {
             let logEmbedding = processedLog?.embedding;
             let cleanedLog = processedLog?.cleanedLog;
 
-            spinner.text = prefix + `: embedding build ${buildId} job:${job.id}/log:${job.logId} -- saving`;
+            spinner.text = prefix + `: embedding build ${buildId} job:${job.index}/log:${job.logId} -- saving`;
 
             // save the embeddings
             let toSave: EmbeddedJobFailure = {
                 buildId: buildId,
-                jobId: job.id,
+                jobId: job.index,
                 issues: issueEmbeddings,
             };
             if (logEmbedding) {

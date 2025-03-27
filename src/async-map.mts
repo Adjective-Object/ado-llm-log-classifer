@@ -29,72 +29,69 @@ export async function asyncMapWithLimitIter<T, V>(
     }
 
     const results: V[] = [];
-
-    type Waiter = {
-        resolve: (v: [number, V]) => void;
-        reject: (err: any) => void;
-    }
-    let complete = 0;
-    let initialErr: any = null;
-    let waiter = {
-        resolve: ([i, item]) => { results[i] = item; complete++; },
-        reject: (err) => { initialErr = err },
-    } as Waiter;
-
-    function startJob(i: number, item: T): Promise<void> {
-        // console.log('start job', i, item);
-        return fn(item).then(
-            (item) => waiter.resolve([i, item]),
-            (err) => {
-                waiter.reject(err);
-                throw err;
-            },
-        );
-    }
+    const errors = new Map<number, any>();
 
     // wait for all jobs to finish
     let sentAll = false;
-    let head = 0;
-    while (!sentAll || complete < head) {
-        // replace the waiter so we can continue when the next promise resolves
-        let continuationPromise = new Promise<void>((resolve, reject) => {
-            let resolved = false;
-            waiter = {
-                resolve: ([index, value]) => {
-                    if (!resolved) {
-                        resolve();
-                    }
-                    results[index] = value;
-                    complete++;
-                },
-                reject: (err) => {
-                    initialErr = err;
-                    reject(err);
-                },
-            }
-        });
+    let sent = 0;
+    let completed = 0;
 
-        // launch new jobs until there are concurrentLimit jobs running
-        while (!sentAll && (head - complete) < concurrentLimit) {
-            let idx = head;
-            let next = items.next();
-            if (next instanceof Promise) {
-                next = await next;
+    let checkAllDone: () => void
+    let allDonePromise = new Promise<void>((resolve, reject) => {
+        checkAllDone = () => {
+            if (sentAll && completed == sent) {
+                resolve()
             }
-            if (next.done) {
-                sentAll = true;
-                // console.log('sent all');
-                break;
-            } else {
-                head++
-            }
-            startJob(idx, next.value);
         }
+    })
 
-        // wait for continuationPromise to mark resolution
-        // console.log('continuationPromise', head, complete);
-        await continuationPromise;
+    async function dispatchJob() {
+        let next = items.next();
+        if (next instanceof Promise) {
+            next = await next;
+        }
+        if (next.done) {
+            sentAll = true;
+            return false
+        } else {
+            let idx = sent
+            sent++
+            // dispatch the job, non-blocking
+            fn(next.value).then(
+                (result) => {
+                    results[idx] = result;
+                    completed++;
+                    if (!sentAll) {
+                        dispatchJob();
+                    }
+                    checkAllDone();
+                },
+                (error) => {
+                    errors.set(idx, error);
+                    completed++;
+                    if (!sentAll) {
+                        dispatchJob();
+                    }
+                    checkAllDone();
+                }
+            )
+            return true
+        }
     }
 
-    return results as V[];
+    // start by spawning jobs up until we reach the concurrentLimit
+    for (let i = 0; i < concurrentLimit; i++) {
+        if (!await dispatchJob()) {
+            break
+        }
+    }
+
+    await allDonePromise
+    if (errors.size == 1 ) {
+        throw errors.values().next().value
+    } else if (errors.size > 1) {
+        throw new Error(`Multiple errors:\n${Array.from(errors.values()).map(e => e.message).join("\n")}`);
+    }
+
+    return results;
 }

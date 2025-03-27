@@ -294,7 +294,7 @@ export class EmbedDir {
         buildId: number,
         raw: FailedJob,
     ) {
-        await saveObject(this.getRawFileForBuildJob(buildId, raw.id), raw);
+        await saveObject(this.getRawFileForBuildJob(buildId, raw.index), raw);
     }
     async loadBuildJobRaw(
         buildId: number,
@@ -356,7 +356,8 @@ export class ClustersDir {
                 await Promise.all(descriptor.referenceJobs.map(async (jobRef) => {
                     let jobEmbedding = await embedDir.loadBuildJobEmbeddings(jobRef.buildId, jobRef.jobId);
                     if (!jobEmbedding) {
-                        throw new Error(`Could not load job embedding for build:${jobRef.buildId}-job:${jobRef.jobId} referenced by cluster ${descriptor.name}. Did you forget to compute embeddings first?`);
+                        let clusterPath = this.getPathForClusterDescriptor(clusterName);
+                        throw new Error(`Could not load job embedding for build:${jobRef.buildId}-job:${jobRef.jobId} referenced by cluster ${descriptor.name} (${clusterPath}). Did you forget to compute embeddings first?`);
                     }
                     return jobEmbedding;
                 }))
