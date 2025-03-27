@@ -21,8 +21,8 @@ It works by downloading logs to your machine, then running an embedding model ov
    - You will also be prompted for the path to a GGUF model in a repo, in `<repo-reference>:<path/in/repo.gguf>` format.
      I have had good results with [`CompendiumLabs/bge-small-en-v1.5-gguf:bge-small-en-v1.5-f32.gguf`](https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/blob/main/bge-small-en-v1.5-f32.gguf)
    - This can take a while to run! If you have a machine with a CUDA-capable GPU, you can add `--gpu cuda` to force the embedding network to run on CUDA instead of the CPU
-     - Latest Nvidia drivers are supposed to automatically pass GPU access through to wsl2, so if you are on windows, make sure you're using the wsl2 docker backend
-      (I tried this out but it turns out that my work PC doesn't have a CUDA-capable graphics card, so you might have to do some additional debugging from here)
+     - Latest Nvidia drivers are supposed to automatically pass GPU access through to wsl2, so if you are on windows, make sure you're using the wsl2 docker backend  
+     - (I tried this out but it turns out that my work PC doesn't actually have a CUDA-capable graphics card, so you might have to do some additional debugging from here)
 3. Once all the logs have embeddings, run `yarn create-clusters`.  
    - You will be repeatedly prompted to either assign a cluster ID to an outlier job, or create a new cluster ID based on a job.
    - Once you have a few clusters defined, you'll be able to create the clusters
